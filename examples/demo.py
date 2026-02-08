@@ -425,14 +425,6 @@ def demo_gbdt(data, epochs, K, transforms=True, residual=True, cosine=True,
         eval_l = DataLoader(eval_ds, batch_size=32)
         return train_l, eval_l
 
-    # --- Also train a standalone GBDT for comparison ---
-    print("\n  [Baseline] Training standalone GBDT (LambdaMART)...")
-    gbdt_standalone, gbdt_standalone_ndcg = train_gbdt_baseline(
-        data["train_X"], data["train_y"],
-        data["eval_X"], data["eval_y"],
-        k=K, n_estimators=300,
-    )
-
     # --- Stage 1: Train GAM on raw features (interpretable signal) ---
     print("\n  [Stage 1] Training GAM on raw features...")
     gam = rg.GAM_Paper(
@@ -525,12 +517,20 @@ def demo_gbdt(data, epochs, K, transforms=True, residual=True, cosine=True,
         l1_output_reg=l1_reg, weight_decay=weight_decay,
     )
 
+    # --- Standalone GBDT baseline (for comparison only, not part of pipeline) ---
+    print("\n  [Comparison] Training standalone GBDT (LambdaMART) for reference...")
+    gbdt_standalone, gbdt_standalone_ndcg = train_gbdt_baseline(
+        data["train_X"], data["train_y"],
+        data["eval_X"], data["eval_y"],
+        k=K, n_estimators=300,
+    )
+
     print(f"\n  Summary:")
-    print(f"    GAM only (136 towers):        NDCG@{K} = {gam_ndcg:.4f}")
-    print(f"    GAM + magic curve (137 towers):NDCG@{K} = {boosted_ndcg:.4f}")
-    print(f"    GBDT standalone (black box):   NDCG@{K} = {gbdt_standalone_ndcg:.4f}")
+    print(f"    GAM only (136 towers):         NDCG@{K} = {gam_ndcg:.4f}")
+    print(f"    GAM + magic curve (137 towers): NDCG@{K} = {boosted_ndcg:.4f}")
+    print(f"    GBDT standalone (black box):    NDCG@{K} = {gbdt_standalone_ndcg:.4f}")
     delta = boosted_ndcg - gam_ndcg
-    print(f"    Magic curve gain:              {delta:+.4f}")
+    print(f"    Magic curve gain:               {delta:+.4f}")
 
     # Plot response curve for the magic curve tower (feature 136)
     boosted_gam.eval()
