@@ -10,6 +10,13 @@ Usage:
     python examples/demo.py --demo multi       # only MultiObjectiveRankingGAM
     python examples/demo.py --demo gam,multi   # GAM + Multi-Objective
     python examples/demo.py --epochs 30        # production quality
+
+Performance enhancements:
+    python examples/demo.py --demo gam --transforms             # learnable monotone feature transforms
+    python examples/demo.py --demo gam --residual               # residual skip connections
+    python examples/demo.py --demo gam --cosine                 # cosine annealing LR
+    python examples/demo.py --demo gam --l1-reg 0.001           # L1 output regularization
+    python examples/demo.py --demo gam --transforms --residual --cosine  # all enhancements
 """
 
 import argparse
@@ -125,16 +132,37 @@ def groupwise_specs(num_base=136):
 # Individual demos
 # =========================================================================
 
-def demo_gam(data, epochs, K):
+def demo_gam(data, epochs, K, transforms=False, residual=False, cosine=False, l1_reg=0.0):
     """Demo 1: GAM -- Interpretable Ranking."""
     print("\n" + "=" * 70)
     print("Demo 1: GAM -- Interpretable Ranking")
     print("=" * 70)
 
-    gam = rg.GAM_Paper(num_features=136, hidden_dims=[16, 8])
+    extras = []
+    if transforms:
+        extras.append("transforms")
+    if residual:
+        extras.append("residual")
+    if cosine:
+        extras.append("cosine_lr")
+    if l1_reg > 0:
+        extras.append(f"l1={l1_reg}")
+    if extras:
+        print(f"  Enhancements: {', '.join(extras)}")
+
+    gam = rg.GAM_Paper(
+        num_features=136, hidden_dims=[16, 8],
+        feature_transforms=transforms, residual=residual,
+    )
+    if transforms:
+        gam.init_transforms_from_data(data["train_X"])
+        print("  Initialized feature transforms from training data percentiles")
+
     gam_ndcg = rg.train_model(
         gam, data["train_loader"], data["eval_loader"], rg.ListNetLoss(),
         epochs=epochs, patience=7, device=device,
+        lr_schedule="cosine" if cosine else "constant",
+        l1_output_reg=l1_reg,
     )
     print(f"\nGAM (ListNet): NDCG@{K} = {gam_ndcg:.4f}")
 
@@ -148,7 +176,8 @@ def demo_gam(data, epochs, K):
     return {"GAM_ListNet": gam_ndcg}
 
 
-def demo_submodular(data, epochs, K, queries_per_epoch):
+def demo_submodular(data, epochs, K, queries_per_epoch,
+                    transforms=False, residual=False, cosine=False, l1_reg=0.0):
     """Demo 2: SubmodularRankingGAM -- Diversity with Greedy Guarantees."""
     print("\n" + "=" * 70)
     print("Demo 2: SubmodularRankingGAM -- Diversity with Greedy Guarantees")
@@ -161,12 +190,19 @@ def demo_submodular(data, epochs, K, queries_per_epoch):
         item_hidden=[16, 8],
         num_knots=8,
         train_mode="pointwise",
+        feature_transforms=transforms,
+        residual=residual,
     )
+    if transforms:
+        submod.init_transforms_from_data(data["train_X"])
+        print("  Initialized feature transforms from training data percentiles")
 
     # Phase 1: base towers
     submod_ndcg = rg.train_model(
         submod, data["train_loader"], data["eval_loader"], rg.ListNetLoss(),
         epochs=epochs, patience=7, device=device,
+        lr_schedule="cosine" if cosine else "constant",
+        l1_output_reg=l1_reg,
     )
 
     # Phase 2: diversity towers
@@ -334,6 +370,7 @@ Examples:
   python examples/demo.py --demo gam
   python examples/demo.py --demo submodular,multi
   python examples/demo.py --demo all --epochs 30
+  python examples/demo.py --demo gam --transforms --cosine --residual
         """,
     )
     parser.add_argument(
@@ -345,6 +382,14 @@ Examples:
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--k", type=int, default=10)
     parser.add_argument("--queries-per-epoch", type=int, default=400)
+    parser.add_argument("--transforms", action="store_true",
+                        help="enable learnable monotone feature transforms (percentile-initialized)")
+    parser.add_argument("--residual", action="store_true",
+                        help="add residual skip connections to MLP towers")
+    parser.add_argument("--cosine", action="store_true",
+                        help="use cosine annealing LR schedule")
+    parser.add_argument("--l1-reg", type=float, default=0.0,
+                        help="L1 output regularization weight (default: 0)")
     args = parser.parse_args()
 
     # Parse demo selection
@@ -361,16 +406,30 @@ Examples:
     QPE = args.queries_per_epoch
 
     print(f"Running demos: {', '.join(sorted(demos))}")
-    print(f"Config: epochs={EPOCHS}, k={K}, queries_per_epoch={QPE}\n")
+    config_parts = [f"epochs={EPOCHS}", f"k={K}", f"queries_per_epoch={QPE}"]
+    if args.transforms:
+        config_parts.append("transforms=ON")
+    if args.residual:
+        config_parts.append("residual=ON")
+    if args.cosine:
+        config_parts.append("cosine_lr=ON")
+    if args.l1_reg > 0:
+        config_parts.append(f"l1_reg={args.l1_reg}")
+    print(f"Config: {', '.join(config_parts)}\n")
 
     data = load_data()
     results = {}
 
+    enhance_kw = dict(
+        transforms=args.transforms, residual=args.residual,
+        cosine=args.cosine, l1_reg=args.l1_reg,
+    )
+
     if "gam" in demos:
-        results.update(demo_gam(data, EPOCHS, K))
+        results.update(demo_gam(data, EPOCHS, K, **enhance_kw))
 
     if "submodular" in demos:
-        results.update(demo_submodular(data, EPOCHS, K, QPE))
+        results.update(demo_submodular(data, EPOCHS, K, QPE, **enhance_kw))
 
     if "multi" in demos:
         results.update(demo_multi_objective(data, EPOCHS, K, QPE))

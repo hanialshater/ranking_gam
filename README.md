@@ -107,11 +107,64 @@ All losses accept `(y_pred, y_true)` of shape `[batch, list_size]`. Padding labe
 
 ## Tower Types
 
-- **`PaperTower`**: Unconstrained MLP. Used for item features.
+- **`PaperTower`**: Unconstrained MLP. Used for item features. Supports `residual=True` (skip connection) and `input_norm=True` (BatchNorm).
 - **`ConcavePWL`**: Monotone non-decreasing + concave. Guarantees submodularity for diversity features.
 - **`MonotonePWL`**: Monotone non-decreasing only. For revenue, freshness, etc.
+- **`LearnableMonotoneTransform`**: Monotone PWL mapping raw features to [0, 1], initialized from data percentiles (empirical CDF). Learned end-to-end while preserving interpretability.
 
 Monotonicity and concavity are enforced via softplus parameterization, not projection.
+
+## Performance Enhancements
+
+All enhancements are opt-in and preserve full interpretability.
+
+### Learnable Monotone Feature Transforms
+
+Per-feature monotone warp initialized from data percentiles (empirical CDF). Maps raw features to [0, 1] so towers see well-normalized inputs. Since monotone-of-f is still a single-variable function, interpretability is preserved.
+
+```python
+model = rg.GAM_Paper(num_features=136, feature_transforms=True, num_transform_knots=20)
+model.init_transforms_from_data(train_X)  # set knot positions from data percentiles
+rg.train_model(model, train_loader, eval_loader, rg.ListNetLoss(), epochs=30)
+```
+
+### Residual Connections
+
+Adds a linear skip from tower input to output (`out = MLP(x) + W*x`), making it easier to learn near-linear effects.
+
+```python
+model = rg.GAM_Paper(num_features=136, residual=True)
+```
+
+### Cosine Annealing LR Schedule
+
+Decays learning rate following a cosine curve over the training epochs.
+
+```python
+rg.train_model(model, train_loader, eval_loader, loss_fn, lr_schedule="cosine")
+```
+
+### L1 Output Regularization
+
+Penalizes large predicted scores to improve generalization.
+
+```python
+rg.train_model(model, train_loader, eval_loader, loss_fn, l1_output_reg=0.001)
+```
+
+### Combining Enhancements
+
+```python
+model = rg.GAM_Paper(
+    num_features=136, hidden_dims=[16, 8],
+    feature_transforms=True, residual=True,
+)
+model.init_transforms_from_data(train_X)
+rg.train_model(
+    model, train_loader, eval_loader, rg.ListNetLoss(),
+    epochs=30, lr_schedule="cosine", l1_output_reg=0.001,
+)
+```
 
 ## Running the Demo
 
@@ -127,6 +180,11 @@ python examples/demo.py --demo gam,multi
 
 # Production quality
 python examples/demo.py --epochs 30
+
+# With performance enhancements
+python examples/demo.py --demo gam --transforms                          # monotone feature transforms
+python examples/demo.py --demo gam --transforms --residual --cosine      # all enhancements
+python examples/demo.py --demo gam --transforms --cosine --l1-reg 0.001  # with L1 regularization
 ```
 
 ## Tests
