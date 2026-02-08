@@ -19,6 +19,7 @@ def train_model(
     model, train_loader, val_loader, loss_fn, epochs=30, lr=0.001,
     patience=7, grad_clip=1.0, device=None,
     lr_schedule="constant", l1_output_reg=0.0,
+    transform_lr_mult=0.1, warmup_epochs=1,
 ):
     """
     Standard training loop with early stopping on NDCG@10.
@@ -35,6 +36,8 @@ def train_model(
         device: torch device (auto-detected if None)
         lr_schedule: "constant" or "cosine" (CosineAnnealingLR over epochs)
         l1_output_reg: L1 penalty weight on predicted scores (0 to disable)
+        transform_lr_mult: LR multiplier for feature transforms (default 0.1x)
+        warmup_epochs: linear LR warmup epochs (default 1, 0 to disable)
 
     Returns:
         best validation NDCG@10
@@ -43,15 +46,39 @@ def train_model(
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model = model.to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+
+    # Separate param groups: transforms get a lower LR to fine-tune gently
+    transform_params = []
+    other_params = []
+    for name, param in model.named_parameters():
+        if "feature_transform" in name:
+            transform_params.append(param)
+        else:
+            other_params.append(param)
+
+    param_groups = [{"params": other_params, "lr": lr}]
+    if transform_params:
+        param_groups.append({"params": transform_params, "lr": lr * transform_lr_mult})
+
+    optimizer = torch.optim.Adam(param_groups)
 
     scheduler = None
     if lr_schedule == "cosine":
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=epochs, eta_min=lr * 0.01,
+        )
 
     best_ndcg = 0
     best_state = None
     patience_counter = 0
+
+    # Linear warmup scheduler (ramps LR from 0 to target over warmup_epochs)
+    warmup_scheduler = None
+    if warmup_epochs > 0 and epochs > warmup_epochs:
+        warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
+            optimizer, start_factor=0.01, end_factor=1.0,
+            total_iters=warmup_epochs,
+        )
 
     for epoch in range(epochs):
         model.train()
@@ -71,7 +98,10 @@ def train_model(
 
         train_loss /= len(train_loader)
 
-        if scheduler is not None:
+        # Step schedulers: warmup first, then cosine
+        if warmup_scheduler is not None and epoch < warmup_epochs:
+            warmup_scheduler.step()
+        elif scheduler is not None:
             scheduler.step()
 
         model.eval()

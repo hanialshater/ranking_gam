@@ -76,6 +76,48 @@ class TestTrainModelCosineSchedule:
         )
         assert isinstance(ndcg, float)
 
+    def test_transform_lr_mult(self, synthetic_data):
+        X, y = synthetic_data
+        train_loader, val_loader = _make_loaders(X, y)
+        model = GAM_Paper(
+            num_features=X.shape[-1], hidden_dims=[8, 4],
+            feature_transforms=True,
+        )
+        model.init_transforms_from_data(X)
+        ndcg = train_model(
+            model, train_loader, val_loader, ListNetLoss(),
+            epochs=3, patience=5, device=torch.device("cpu"),
+            transform_lr_mult=0.1,
+        )
+        assert isinstance(ndcg, float)
+
+    def test_warmup_epochs(self, synthetic_data):
+        X, y = synthetic_data
+        train_loader, val_loader = _make_loaders(X, y)
+        model = GAM_Paper(num_features=X.shape[-1], hidden_dims=[8, 4])
+        ndcg = train_model(
+            model, train_loader, val_loader, ListNetLoss(),
+            epochs=4, patience=5, device=torch.device("cpu"),
+            warmup_epochs=2,
+        )
+        assert isinstance(ndcg, float)
+
+    def test_all_enhancements(self, synthetic_data):
+        X, y = synthetic_data
+        train_loader, val_loader = _make_loaders(X, y)
+        model = GAM_Paper(
+            num_features=X.shape[-1], hidden_dims=[8, 4],
+            feature_transforms=True, residual=True,
+        )
+        model.init_transforms_from_data(X)
+        ndcg = train_model(
+            model, train_loader, val_loader, ListNetLoss(),
+            epochs=4, patience=5, device=torch.device("cpu"),
+            lr_schedule="cosine", l1_output_reg=0.01,
+            transform_lr_mult=0.1, warmup_epochs=1,
+        )
+        assert isinstance(ndcg, float)
+
 
 class TestTrainDiversityTowers:
     def test_phase2(self, synthetic_augmented):
