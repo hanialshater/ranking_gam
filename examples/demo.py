@@ -452,9 +452,9 @@ def demo_gbdt(data, epochs, K, transforms=True, residual=True, cosine=True,
     )
     print(f"  Stage 1 GAM: NDCG@{K} = {gam_ndcg:.4f}")
 
-    # --- Stage 2: Compute residuals, train GBDT on what GAM missed ---
-    print("\n  [Stage 2] Training GBDT on GAM residuals...")
-    from ranking_gam.training.boosting import _gam_predict, _train_gbdt_on_targets
+    # --- Stage 2: Compute residuals, train GBDT regressor on what GAM missed ---
+    print("\n  [Stage 2] Training GBDT regressor on GAM residuals...")
+    from ranking_gam.training.boosting import _gam_predict, _train_gbdt_regression
 
     gam_scores_train = _gam_predict(gam, data["train_X"], device)
     gam_scores_eval = _gam_predict(gam, data["eval_X"], device)
@@ -467,19 +467,16 @@ def demo_gbdt(data, epochs, K, transforms=True, residual=True, cosine=True,
             g_mean, g_std = gs[valid].mean(), max(gs[valid].std(), 1e-6)
             y_mean, y_std = y_true[valid].astype(np.float32).mean(), max(y_true[valid].astype(np.float32).std(), 1e-6)
             gs_norm = (gs - g_mean) / g_std * y_std + y_mean
-            res = y_true.astype(np.float32) - gs_norm
-            res_valid = res[valid]
-            res_valid = res_valid - res_valid.min()  # shift to non-negative
-            residuals[valid] = res_valid
+            residuals[valid] = y_true[valid].astype(np.float32) - gs_norm[valid]
         return residuals
 
     train_residuals = _make_residual_labels(data["train_y"], gam_scores_train)
     eval_residuals = _make_residual_labels(data["eval_y"], gam_scores_eval)
 
-    gbdt_residual = _train_gbdt_on_targets(
+    gbdt_residual = _train_gbdt_regression(
         data["train_X"], train_residuals,
         data["eval_X"], eval_residuals,
-        k=K, n_estimators=300,
+        n_estimators=300,
     )
 
     # --- Stage 3: Add magic curve tower (freeze D towers, train tower D+1) ---

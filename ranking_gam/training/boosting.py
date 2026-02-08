@@ -26,6 +26,75 @@ def _gam_predict(model, X, device=None):
     return np.array(scores)
 
 
+def _train_gbdt_regression(train_X, train_y, eval_X, eval_y, **lgbm_kwargs):
+    """
+    Train a LightGBM regressor on continuous targets (e.g. residuals).
+
+    Unlike _train_gbdt_on_targets which uses LambdaMART ranking,
+    this uses regression since residuals are continuous floats.
+
+    Args:
+        train_X: [B, L, D] numpy features
+        train_y: [B, L] numpy targets (-1 = padding)
+        eval_X: [B, L, D] numpy features
+        eval_y: [B, L] numpy targets
+        **lgbm_kwargs: passed to LGBMRegressor
+
+    Returns:
+        fitted LGBMRegressor
+    """
+    try:
+        import lightgbm as lgb
+    except ImportError:
+        raise ImportError(
+            "lightgbm is required for GBDT training. "
+            "Install with: pip install lightgbm>=4.0"
+        )
+
+    B_tr = train_X.shape[0]
+    D = train_X.shape[-1]
+
+    X_train_list = []
+    y_train_list = []
+    for qi in range(B_tr):
+        valid = train_y[qi] >= 0
+        if valid.sum() > 0:
+            X_train_list.append(train_X[qi][valid])
+            y_train_list.append(train_y[qi][valid])
+
+    X_tr = np.concatenate(X_train_list, axis=0)
+    y_tr = np.concatenate(y_train_list, axis=0)
+
+    B_ev = eval_X.shape[0]
+    X_eval_list = []
+    y_eval_list = []
+    for qi in range(B_ev):
+        valid = eval_y[qi] >= 0
+        if valid.sum() > 0:
+            X_eval_list.append(eval_X[qi][valid])
+            y_eval_list.append(eval_y[qi][valid])
+
+    X_ev = np.concatenate(X_eval_list, axis=0)
+    y_ev = np.concatenate(y_eval_list, axis=0)
+
+    defaults = dict(
+        objective="regression",
+        n_estimators=300,
+        num_leaves=31,
+        learning_rate=0.1,
+        verbose=-1,
+    )
+    defaults.update(lgbm_kwargs)
+
+    regressor = lgb.LGBMRegressor(**defaults)
+    regressor.fit(
+        X_tr, y_tr,
+        eval_set=[(X_ev, y_ev)],
+    )
+
+    return regressor
+
+
 def _train_gbdt_on_targets(train_X, train_y, eval_X, eval_y, k=10, **lgbm_kwargs):
     """
     Train a LightGBM LambdaMART ranker on given targets.
@@ -210,7 +279,7 @@ def train_gbdt_residual_boost(
     Returns:
         dict with:
             "boosted_model": GAM with D+1 features (original + GBDT residual)
-            "gbdt_model": fitted LGBMRanker (trained on residuals)
+            "gbdt_model": fitted LGBMRegressor (trained on residuals)
             "stage1_ndcg": GAM-only NDCG
             "gbdt_residual_ndcg": GBDT-on-residuals NDCG (ranking by residual prediction)
             "boosted_ndcg": final GAM+magic-curve NDCG
@@ -232,41 +301,35 @@ def train_gbdt_residual_boost(
     )
     print(f"  Stage 1 GAM: NDCG@{k} = {stage1_ndcg:.4f}")
 
-    # --- Stage 2: Compute residuals, train GBDT on them ---
-    print("\n  Stage 2: Training GBDT on GAM residuals...")
+    # --- Stage 2: Compute residuals, train GBDT regressor on them ---
+    print("\n  Stage 2: Training GBDT regressor on GAM residuals...")
     gam_scores_train = _gam_predict(model, train_X, device)
     gam_scores_eval = _gam_predict(model, eval_X, device)
 
-    # Residual labels: how much relevance GAM missed per position.
-    # For LambdaMART we need non-negative targets, so we shift residuals
-    # to [0, max] range. The ranking order is preserved.
+    # Residual = true relevance - normalized GAM score
+    # This captures what the GAM missed per document.
     def _make_residual_labels(y_true, gam_scores):
         valid = y_true >= 0
         residuals = np.full_like(y_true, -1, dtype=np.float32)
         if valid.any():
-            # Normalize GAM scores to same scale as labels
             gs = gam_scores.copy()
             g_mean, g_std = gs[valid].mean(), max(gs[valid].std(), 1e-6)
             y_mean, y_std = y_true[valid].astype(np.float32).mean(), max(y_true[valid].astype(np.float32).std(), 1e-6)
             gs_norm = (gs - g_mean) / g_std * y_std + y_mean
-            res = y_true.astype(np.float32) - gs_norm
-            # Shift to non-negative (LambdaMART needs non-negative labels)
-            res_valid = res[valid]
-            res_valid = res_valid - res_valid.min()
-            residuals[valid] = res_valid
+            residuals[valid] = y_true[valid].astype(np.float32) - gs_norm[valid]
         return residuals
 
     train_residuals = _make_residual_labels(train_y, gam_scores_train)
     eval_residuals = _make_residual_labels(eval_y, gam_scores_eval)
 
-    gbdt_model = _train_gbdt_on_targets(
-        train_X, train_residuals, eval_X, eval_residuals, k=k,
+    # Use regression (not ranking) since residuals are continuous floats
+    gbdt_model = _train_gbdt_regression(
+        train_X, train_residuals, eval_X, eval_residuals,
     )
 
-    # Eval: GBDT residual scores alone aren't meaningful for NDCG on original labels,
-    # but we report it for diagnostics
+    # Diagnostics: how well does GBDT residual prediction rank on original labels?
     gbdt_res_ndcg = _gbdt_eval_ndcg(gbdt_model, eval_X, eval_y, k=k)
-    print(f"  GBDT (on residuals): NDCG@{k} = {gbdt_res_ndcg:.4f} (ranking by residual prediction)")
+    print(f"  GBDT (residual regressor): NDCG@{k} = {gbdt_res_ndcg:.4f} (ranking by predicted residual)")
 
     # --- Stage 3: Add magic curve tower to trained GAM ---
     # Keep the D trained towers frozen, only train the new GBDT tower (D+1).
