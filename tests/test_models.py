@@ -37,6 +37,63 @@ class TestGAMPaper:
                 assert p.grad is not None
 
 
+class TestGAMTowerDropout:
+    def test_tower_dropout_training(self, synthetic_tensors):
+        X, y = synthetic_tensors
+        model = GAM_Paper(num_features=X.shape[-1], hidden_dims=[8, 4], tower_dropout=0.3)
+        model.train()
+        out1 = model(X)
+        out2 = model(X)
+        # With dropout, outputs should differ between calls (stochastic)
+        assert out1.shape == (X.shape[0], X.shape[1])
+        # Not guaranteed to differ on tiny data, but shape must be right
+
+    def test_tower_dropout_eval(self, synthetic_tensors):
+        X, y = synthetic_tensors
+        model = GAM_Paper(num_features=X.shape[-1], hidden_dims=[8, 4], tower_dropout=0.3)
+        model.eval()
+        out1 = model(X)
+        out2 = model(X)
+        # In eval mode, dropout is off, so outputs should be identical
+        torch.testing.assert_close(out1, out2)
+
+    def test_tower_dropout_zero_is_noop(self, synthetic_tensors):
+        X, y = synthetic_tensors
+        model = GAM_Paper(num_features=X.shape[-1], hidden_dims=[8, 4], tower_dropout=0.0)
+        model.eval()
+        out = model(X)
+        assert out.shape == (X.shape[0], X.shape[1])
+
+
+class TestGAMOutputNorm:
+    def test_output_norm_forward(self, synthetic_tensors):
+        X, y = synthetic_tensors
+        model = GAM_Paper(num_features=X.shape[-1], hidden_dims=[8, 4], output_norm=True)
+        out = model(X)
+        assert out.shape == (X.shape[0], X.shape[1])
+
+    def test_output_norm_gradient_flows(self, synthetic_tensors):
+        X, y = synthetic_tensors
+        model = GAM_Paper(num_features=X.shape[-1], hidden_dims=[8, 4], output_norm=True)
+        out = model(X)
+        out.sum().backward()
+        for p in model.parameters():
+            if p.requires_grad:
+                assert p.grad is not None
+
+    def test_both_together(self, synthetic_tensors):
+        X, y = synthetic_tensors
+        model = GAM_Paper(
+            num_features=X.shape[-1], hidden_dims=[8, 4],
+            tower_dropout=0.2, output_norm=True,
+            feature_transforms=True, residual=True,
+        )
+        model.train()
+        out = model(X)
+        assert out.shape == (X.shape[0], X.shape[1])
+        out.sum().backward()
+
+
 class TestGA2MPaper:
     def test_forward_no_interactions(self, synthetic_tensors):
         X, y = synthetic_tensors
@@ -65,6 +122,42 @@ class TestGA2MPaper:
         x2 = np.linspace(-1, 1, 10).astype(np.float32)
         eff = model.get_interaction_effect(0, x1, x2)
         assert eff.shape == (10,)
+
+
+class TestGA2MEnhancements:
+    def test_tower_dropout(self, synthetic_tensors):
+        X, y = synthetic_tensors
+        D = X.shape[-1]
+        model = GA2M_Paper(
+            num_features=D, interaction_pairs=[(0, 1)],
+            hidden_dims=[8, 4], tower_dropout=0.3,
+        )
+        model.train()
+        out = model(X)
+        assert out.shape == (X.shape[0], X.shape[1])
+
+    def test_output_norm(self, synthetic_tensors):
+        X, y = synthetic_tensors
+        D = X.shape[-1]
+        model = GA2M_Paper(
+            num_features=D, interaction_pairs=[(0, 1)],
+            hidden_dims=[8, 4], output_norm=True,
+        )
+        out = model(X)
+        assert out.shape == (X.shape[0], X.shape[1])
+
+    def test_all_enhancements(self, synthetic_tensors):
+        X, y = synthetic_tensors
+        D = X.shape[-1]
+        model = GA2M_Paper(
+            num_features=D, interaction_pairs=[(0, 1), (2, 3)],
+            hidden_dims=[8, 4], feature_transforms=True,
+            residual=True, tower_dropout=0.2, output_norm=True,
+        )
+        model.train()
+        out = model(X)
+        assert out.shape == (X.shape[0], X.shape[1])
+        out.sum().backward()
 
 
 class TestContextPresentGA2M:

@@ -41,10 +41,12 @@ def plot_response_curves(
     # Resolve the tower list
     if hasattr(model, "towers"):
         towers = model.towers
+    elif hasattr(model, "main_towers"):
+        towers = model.main_towers
     elif hasattr(model, "item_towers"):
         towers = model.item_towers
     else:
-        raise AttributeError("Model must have .towers or .item_towers")
+        raise AttributeError("Model must have .towers, .main_towers, or .item_towers")
 
     num_features = len(towers)
 

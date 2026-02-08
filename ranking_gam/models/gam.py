@@ -34,6 +34,8 @@ class GA2M_Paper(nn.Module):
         input_norm=False,
         feature_transforms=False,
         num_transform_knots=20,
+        tower_dropout=0.0,
+        output_norm=False,
     ):
         super().__init__()
         if hidden_dims is None:
@@ -44,6 +46,8 @@ class GA2M_Paper(nn.Module):
         self.num_features = num_features
         self.interaction_pairs = interaction_pairs or []
         self.num_interactions = len(self.interaction_pairs)
+        self.tower_dropout_rate = tower_dropout
+        self.output_norm = output_norm
 
         self.main_towers = nn.ModuleList(
             [PaperTower(1, hidden_dims, dropout, residual, input_norm) for _ in range(num_features)]
@@ -61,6 +65,10 @@ class GA2M_Paper(nn.Module):
             self.feature_transforms = nn.ModuleList(
                 [LearnableMonotoneTransform(num_knots=num_transform_knots) for _ in range(num_features)]
             )
+
+        n_total_towers = num_features + self.num_interactions
+        if output_norm:
+            self.tower_norm = nn.BatchNorm1d(n_total_towers, affine=False)
 
         self.global_bias = nn.Parameter(torch.zeros(1))
 
@@ -80,16 +88,15 @@ class GA2M_Paper(nn.Module):
         batch_size, list_size, _ = x.shape
         x_flat = x.view(batch_size * list_size, -1)
 
-        main_scores = []
+        all_tower_outputs = []
+
         for i, tower in enumerate(self.main_towers):
             feat = x_flat[:, i : i + 1]
             if self.feature_transforms is not None:
                 feat = self.feature_transforms[i](feat)
-            main_scores.append(tower(feat))
-        main_total = torch.stack(main_scores, dim=0).sum(dim=0)
+            all_tower_outputs.append(tower(feat))
 
         if self.num_interactions > 0:
-            int_scores = []
             for i, tower in enumerate(self.interaction_towers):
                 f1, f2 = self.interaction_pairs[i]
                 feat1 = x_flat[:, f1]
@@ -98,12 +105,23 @@ class GA2M_Paper(nn.Module):
                     feat1 = self.feature_transforms[f1](feat1)
                     feat2 = self.feature_transforms[f2](feat2)
                 feat_pair = torch.stack([feat1, feat2], dim=-1)
-                int_scores.append(tower(feat_pair))
-            int_total = torch.stack(int_scores, dim=0).sum(dim=0)
-        else:
-            int_total = 0.0
+                all_tower_outputs.append(tower(feat_pair))
 
-        scores = (main_total + int_total).view(batch_size, list_size) + self.global_bias
+        # [B*L, N_towers]
+        tower_out = torch.cat(all_tower_outputs, dim=-1)
+
+        if self.tower_dropout_rate > 0 and self.training:
+            n_towers = tower_out.shape[-1]
+            mask = torch.bernoulli(
+                torch.full((1, n_towers), 1 - self.tower_dropout_rate, device=tower_out.device)
+            )
+            tower_out = tower_out * mask / (1 - self.tower_dropout_rate)
+
+        if self.output_norm:
+            tower_out = self.tower_norm(tower_out)
+
+        total = tower_out.sum(dim=-1)
+        scores = total.view(batch_size, list_size) + self.global_bias
         return scores
 
     def get_main_effect(self, feature_idx, x_values):
@@ -137,6 +155,10 @@ class GAM_Paper(nn.Module):
     GAM baseline with paper architecture (no interactions).
 
     score = sum f_j(x_j) + bias
+
+    Optional enhancements (all off by default for backward compat):
+        tower_dropout: randomly zero out tower outputs during training
+        output_norm: center tower outputs to zero mean (prevents one tower dominating)
     """
 
     def __init__(
@@ -148,11 +170,15 @@ class GAM_Paper(nn.Module):
         input_norm=False,
         feature_transforms=False,
         num_transform_knots=20,
+        tower_dropout=0.0,
+        output_norm=False,
     ):
         super().__init__()
         if hidden_dims is None:
             hidden_dims = [16, 8]
         self.num_features = num_features
+        self.tower_dropout_rate = tower_dropout
+        self.output_norm = output_norm
 
         self.towers = nn.ModuleList(
             [PaperTower(1, hidden_dims, dropout, residual, input_norm) for _ in range(num_features)]
@@ -163,6 +189,9 @@ class GAM_Paper(nn.Module):
             self.feature_transforms = nn.ModuleList(
                 [LearnableMonotoneTransform(num_knots=num_transform_knots) for _ in range(num_features)]
             )
+
+        if output_norm:
+            self.tower_norm = nn.BatchNorm1d(num_features, affine=False)
 
         self.global_bias = nn.Parameter(torch.zeros(1))
 
@@ -188,7 +217,21 @@ class GAM_Paper(nn.Module):
                 feat = self.feature_transforms[i](feat)
             scores.append(tower(feat))
 
-        total = torch.stack(scores, dim=0).sum(dim=0)
+        # Stack tower outputs: [num_features, B*L, 1] -> [B*L, num_features]
+        tower_out = torch.cat(scores, dim=-1)
+
+        # Tower dropout: randomly zero out entire tower outputs during training
+        if self.tower_dropout_rate > 0 and self.training:
+            mask = torch.bernoulli(
+                torch.full((1, self.num_features), 1 - self.tower_dropout_rate, device=tower_out.device)
+            )
+            tower_out = tower_out * mask / (1 - self.tower_dropout_rate)
+
+        # Output normalization: center tower outputs to prevent dominance
+        if self.output_norm:
+            tower_out = self.tower_norm(tower_out)
+
+        total = tower_out.sum(dim=-1)
         return total.view(batch_size, list_size) + self.global_bias
 
     def get_main_effect(self, feature_idx, x_values):

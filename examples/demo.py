@@ -132,11 +132,28 @@ def groupwise_specs(num_base=136):
 # Individual demos
 # =========================================================================
 
+def _make_loss(loss_name, label_smoothing=0.0):
+    """Create loss function by name."""
+    if loss_name == "listnet":
+        return rg.ListNetLoss(label_smoothing=label_smoothing)
+    elif loss_name == "approxndcg":
+        return rg.ApproxNDCGLoss(alpha=10)
+    elif loss_name == "ndcg2pp":
+        return rg.LambdaLoss.ndcg2pp()
+    elif loss_name == "listmle":
+        return rg.ListMLELoss()
+    else:
+        raise ValueError(f"Unknown loss: {loss_name}. Choose from: listnet, approxndcg, ndcg2pp, listmle")
+
+
 def demo_gam(data, epochs, K, transforms=True, residual=True, cosine=True,
-             l1_reg=0.001, label_smoothing=0.1, weight_decay=0.01):
-    """Demo 1: GAM -- Interpretable Ranking."""
+             l1_reg=0.001, label_smoothing=0.1, weight_decay=0.01,
+             loss="listnet", tower_dropout=0.0, output_norm=False,
+             ga2m=False, ga2m_pairs=20):
+    """Demo 1: GAM / GA2M -- Interpretable Ranking."""
+    model_name = "GA2M" if ga2m else "GAM"
     print("\n" + "=" * 70)
-    print("Demo 1: GAM -- Interpretable Ranking")
+    print(f"Demo 1: {model_name} -- Interpretable Ranking")
     print("=" * 70)
 
     extras = []
@@ -152,34 +169,56 @@ def demo_gam(data, epochs, K, transforms=True, residual=True, cosine=True,
         extras.append(f"label_smooth={label_smoothing}")
     if weight_decay > 0:
         extras.append(f"wd={weight_decay}")
-    if extras:
-        print(f"  Enhancements: {', '.join(extras)}")
+    if tower_dropout > 0:
+        extras.append(f"tower_drop={tower_dropout}")
+    if output_norm:
+        extras.append("output_norm")
+    if ga2m:
+        extras.append(f"ga2m(top_{ga2m_pairs}_pairs)")
+    extras.append(f"loss={loss}")
+    print(f"  Enhancements: {', '.join(extras)}")
 
-    gam = rg.GAM_Paper(
-        num_features=136, hidden_dims=[16, 8],
-        feature_transforms=transforms, residual=residual,
-    )
+    interaction_pairs = None
+    if ga2m:
+        from ranking_gam.interactions import select_interactions_correlation
+        interaction_pairs = select_interactions_correlation(
+            data["train_X"], data["train_y"], top_k=ga2m_pairs,
+        )
+
+    if ga2m:
+        model = rg.GA2M_Paper(
+            num_features=136, hidden_dims=[16, 8],
+            interaction_pairs=interaction_pairs,
+            feature_transforms=transforms, residual=residual,
+            tower_dropout=tower_dropout, output_norm=output_norm,
+        )
+    else:
+        model = rg.GAM_Paper(
+            num_features=136, hidden_dims=[16, 8],
+            feature_transforms=transforms, residual=residual,
+            tower_dropout=tower_dropout, output_norm=output_norm,
+        )
     if transforms:
-        gam.init_transforms_from_data(data["train_X"])
+        model.init_transforms_from_data(data["train_X"])
         print("  Initialized feature transforms from training data percentiles")
 
-    gam_ndcg = rg.train_model(
-        gam, data["train_loader"], data["eval_loader"],
-        rg.ListNetLoss(label_smoothing=label_smoothing),
+    loss_fn = _make_loss(loss, label_smoothing)
+    ndcg = rg.train_model(
+        model, data["train_loader"], data["eval_loader"], loss_fn,
         epochs=epochs, patience=7, device=device,
         lr_schedule="cosine" if cosine else "constant",
         l1_output_reg=l1_reg, weight_decay=weight_decay,
     )
-    print(f"\nGAM (ListNet): NDCG@{K} = {gam_ndcg:.4f}")
+    print(f"\n{model_name} ({loss}): NDCG@{K} = {ndcg:.4f}")
 
     fig = plot_response_curves(
-        gam, feature_names=MSLR_FEATURE_NAMES, data=data["X_flat"], top_k=15,
+        model, feature_names=MSLR_FEATURE_NAMES, data=data["X_flat"], top_k=15,
     )
-    fig.savefig("response_curves_gam.png", dpi=150, bbox_inches="tight")
+    fig.savefig(f"response_curves_{model_name.lower()}.png", dpi=150, bbox_inches="tight")
     plt.close(fig)
-    print("  Saved: response_curves_gam.png")
+    print(f"  Saved: response_curves_{model_name.lower()}.png")
 
-    return {"GAM_ListNet": gam_ndcg}
+    return {f"{model_name}_{loss}": ndcg}
 
 
 def demo_submodular(data, epochs, K, queries_per_epoch,
@@ -534,10 +573,13 @@ Demo choices:
   gbdt         GBDT baseline + residual-boosted GAM (requires lightgbm)
 
 Examples:
-  python examples/demo.py --demo gam                  # best config (default)
-  python examples/demo.py --demo gam --epochs 30      # production quality
-  python examples/demo.py --demo gbdt                 # compare GAM vs GBDT vs boosted
-  python examples/demo.py --demo gam --no-transforms  # disable transforms only
+  python examples/demo.py --demo gam                         # best config (default)
+  python examples/demo.py --demo gam --epochs 30             # production quality
+  python examples/demo.py --demo gam --loss approxndcg       # compare losses
+  python examples/demo.py --demo gam --ga2m --ga2m-pairs 20  # GA2M with interactions
+  python examples/demo.py --demo gam --tower-dropout 0.1     # regularize via tower dropout
+  python examples/demo.py --demo gam --output-norm           # center tower outputs
+  python examples/demo.py --demo gbdt                        # compare GAM vs GBDT vs boosted
   python examples/demo.py --demo gam --no-transforms --no-residual --no-cosine --l1-reg 0  # bare GAM
         """,
     )
@@ -563,6 +605,18 @@ Examples:
                         help="label smoothing for ListNet (default: 0.1, 0 to disable)")
     parser.add_argument("--weight-decay", type=float, default=0.01,
                         help="AdamW weight decay (default: 0.01, 0 to disable)")
+    # New improvement flags (off by default for comparison)
+    parser.add_argument("--loss", type=str, default="listnet",
+                        choices=["listnet", "approxndcg", "ndcg2pp", "listmle"],
+                        help="ranking loss function (default: listnet)")
+    parser.add_argument("--tower-dropout", type=float, default=0.0,
+                        help="tower output dropout rate (default: 0, e.g. 0.1)")
+    parser.add_argument("--output-norm", action="store_true",
+                        help="enable tower output normalization (BatchNorm)")
+    parser.add_argument("--ga2m", action="store_true",
+                        help="use GA2M with pairwise interactions instead of GAM")
+    parser.add_argument("--ga2m-pairs", type=int, default=20,
+                        help="number of interaction pairs for GA2M (default: 20)")
     # Backward compat: keep --transforms etc. as no-ops (already default)
     parser.add_argument("--transforms", action="store_true", default=True,
                         help=argparse.SUPPRESS)
@@ -591,7 +645,7 @@ Examples:
     QPE = args.queries_per_epoch
 
     print(f"Running demos: {', '.join(sorted(demos))}")
-    config_parts = [f"epochs={EPOCHS}", f"k={K}"]
+    config_parts = [f"epochs={EPOCHS}", f"k={K}", f"loss={args.loss}"]
     config_parts.append(f"transforms={'ON' if use_transforms else 'OFF'}")
     config_parts.append(f"residual={'ON' if use_residual else 'OFF'}")
     config_parts.append(f"cosine_lr={'ON' if use_cosine else 'OFF'}")
@@ -601,28 +655,42 @@ Examples:
         config_parts.append(f"label_smooth={args.label_smoothing}")
     if args.weight_decay > 0:
         config_parts.append(f"wd={args.weight_decay}")
+    if args.tower_dropout > 0:
+        config_parts.append(f"tower_drop={args.tower_dropout}")
+    if args.output_norm:
+        config_parts.append("output_norm")
+    if args.ga2m:
+        config_parts.append(f"ga2m(pairs={args.ga2m_pairs})")
     print(f"Config: {', '.join(config_parts)}\n")
 
     data = load_data()
     results = {}
 
-    enhance_kw = dict(
+    # Base training kwargs shared by all demos
+    base_kw = dict(
         transforms=use_transforms, residual=use_residual,
         cosine=use_cosine, l1_reg=args.l1_reg,
         label_smoothing=args.label_smoothing, weight_decay=args.weight_decay,
     )
+    # Extra kwargs only for GAM/GA2M demo
+    gam_kw = dict(
+        **base_kw,
+        loss=args.loss, tower_dropout=args.tower_dropout,
+        output_norm=args.output_norm, ga2m=args.ga2m,
+        ga2m_pairs=args.ga2m_pairs,
+    )
 
     if "gam" in demos:
-        results.update(demo_gam(data, EPOCHS, K, **enhance_kw))
+        results.update(demo_gam(data, EPOCHS, K, **gam_kw))
 
     if "submodular" in demos:
-        results.update(demo_submodular(data, EPOCHS, K, QPE, **enhance_kw))
+        results.update(demo_submodular(data, EPOCHS, K, QPE, **base_kw))
 
     if "multi" in demos:
-        results.update(demo_multi_objective(data, EPOCHS, K, QPE, **enhance_kw))
+        results.update(demo_multi_objective(data, EPOCHS, K, QPE, **base_kw))
 
     if "gbdt" in demos:
-        results.update(demo_gbdt(data, EPOCHS, K, **enhance_kw))
+        results.update(demo_gbdt(data, EPOCHS, K, **base_kw))
 
     # Summary
     if results:
