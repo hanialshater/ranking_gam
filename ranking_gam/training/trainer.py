@@ -20,9 +20,10 @@ def train_model(
     patience=7, grad_clip=1.0, device=None,
     lr_schedule="constant", l1_output_reg=0.0,
     transform_lr_mult=0.1, warmup_epochs=1,
+    weight_decay=0.0, eval_k=10,
 ):
     """
-    Standard training loop with early stopping on NDCG@10.
+    Standard training loop with early stopping on NDCG.
 
     Args:
         model: any ranking model (GAM, GA2M, SubmodularRankingGAM, etc.)
@@ -38,9 +39,11 @@ def train_model(
         l1_output_reg: L1 penalty weight on predicted scores (0 to disable)
         transform_lr_mult: LR multiplier for feature transforms (default 0.1x)
         warmup_epochs: linear LR warmup epochs (default 1, 0 to disable)
+        weight_decay: L2 weight decay for AdamW (default 0, uses Adam)
+        eval_k: NDCG cutoff for validation (default 10)
 
     Returns:
-        best validation NDCG@10
+        best validation NDCG@eval_k
     """
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -60,7 +63,8 @@ def train_model(
     if transform_params:
         param_groups.append({"params": transform_params, "lr": lr * transform_lr_mult})
 
-    optimizer = torch.optim.Adam(param_groups)
+    OptimClass = torch.optim.AdamW if weight_decay > 0 else torch.optim.Adam
+    optimizer = OptimClass(param_groups, weight_decay=weight_decay)
 
     scheduler = None
     if lr_schedule == "cosine":
@@ -110,10 +114,10 @@ def train_model(
             for X, y in val_loader:
                 X, y = X.to(device), y.to(device)
                 pred = model(X)
-                val_ndcg.append(compute_ndcg(pred, y, k=10))
+                val_ndcg.append(compute_ndcg(pred, y, k=eval_k))
 
         val_ndcg = np.mean(val_ndcg)
-        print(f"Epoch {epoch + 1:2d}: loss={train_loss:.4f}, val_ndcg@10={val_ndcg:.4f}")
+        print(f"Epoch {epoch + 1:2d}: loss={train_loss:.4f}, val_ndcg@{eval_k}={val_ndcg:.4f}")
 
         if val_ndcg > best_ndcg:
             best_ndcg = val_ndcg

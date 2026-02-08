@@ -102,6 +102,39 @@ class TestTrainModelCosineSchedule:
         )
         assert isinstance(ndcg, float)
 
+    def test_weight_decay(self, synthetic_data):
+        X, y = synthetic_data
+        train_loader, val_loader = _make_loaders(X, y)
+        model = GAM_Paper(num_features=X.shape[-1], hidden_dims=[8, 4])
+        ndcg = train_model(
+            model, train_loader, val_loader, ListNetLoss(),
+            epochs=2, patience=5, device=torch.device("cpu"),
+            weight_decay=0.01,
+        )
+        assert isinstance(ndcg, float)
+
+    def test_eval_k(self, synthetic_data):
+        X, y = synthetic_data
+        train_loader, val_loader = _make_loaders(X, y)
+        model = GAM_Paper(num_features=X.shape[-1], hidden_dims=[8, 4])
+        ndcg = train_model(
+            model, train_loader, val_loader, ListNetLoss(),
+            epochs=2, patience=5, device=torch.device("cpu"),
+            eval_k=5,
+        )
+        assert isinstance(ndcg, float)
+        assert 0.0 <= ndcg <= 1.0
+
+    def test_label_smoothing_loss(self, synthetic_data):
+        X, y = synthetic_data
+        train_loader, val_loader = _make_loaders(X, y)
+        model = GAM_Paper(num_features=X.shape[-1], hidden_dims=[8, 4])
+        ndcg = train_model(
+            model, train_loader, val_loader, ListNetLoss(label_smoothing=0.1),
+            epochs=2, patience=5, device=torch.device("cpu"),
+        )
+        assert isinstance(ndcg, float)
+
     def test_all_enhancements(self, synthetic_data):
         X, y = synthetic_data
         train_loader, val_loader = _make_loaders(X, y)
@@ -111,10 +144,11 @@ class TestTrainModelCosineSchedule:
         )
         model.init_transforms_from_data(X)
         ndcg = train_model(
-            model, train_loader, val_loader, ListNetLoss(),
+            model, train_loader, val_loader, ListNetLoss(label_smoothing=0.1),
             epochs=4, patience=5, device=torch.device("cpu"),
             lr_schedule="cosine", l1_output_reg=0.01,
             transform_lr_mult=0.1, warmup_epochs=1,
+            weight_decay=0.01, eval_k=5,
         )
         assert isinstance(ndcg, float)
 

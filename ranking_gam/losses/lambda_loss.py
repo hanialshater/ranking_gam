@@ -131,6 +131,15 @@ class LambdaLoss(nn.Module):
         else:
             raise ValueError(f"Unknown weighing scheme: {self.weighing_scheme}")
 
+    @classmethod
+    def ndcg2pp(cls, k=10, mu=10.0, sigma=1.0):
+        """Convenience constructor for ndcgLoss2++ (best variant in the paper).
+
+        Usage:
+            loss = LambdaLoss.ndcg2pp(k=10)
+        """
+        return cls(weighing_scheme="ndcgLoss2++", k=k, mu=mu, sigma=sigma)
+
     def _ndcg2_weights(self, G, D):
         L = G.shape[1]
         pos_idxs = torch.arange(1, L + 1, device=G.device)

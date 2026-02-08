@@ -88,12 +88,38 @@ class TestListNetLoss:
         loss.backward()
         assert y_pred.grad is not None
 
+    def test_label_smoothing(self, pred_and_labels):
+        y_pred, y_true = pred_and_labels
+        loss_no_smooth = ListNetLoss()(y_pred, y_true)
+        loss_smooth = ListNetLoss(label_smoothing=0.1)(y_pred, y_true)
+        assert loss_smooth.shape == ()
+        assert torch.isfinite(loss_smooth)
+        # Smoothing should change the loss value
+        assert loss_no_smooth.item() != pytest.approx(loss_smooth.item(), abs=1e-6)
+
+    def test_label_smoothing_gradient(self, pred_and_labels):
+        y_pred, y_true = pred_and_labels
+        y_pred.requires_grad_(True)
+        loss = ListNetLoss(label_smoothing=0.2)(y_pred, y_true)
+        loss.backward()
+        assert y_pred.grad is not None
+
 
 class TestLambdaLoss:
     @pytest.mark.parametrize("scheme", [None, "lambdaRank", "ndcgLoss1", "ndcgLoss2", "ndcgLoss2++"])
     def test_all_schemes(self, pred_and_labels, scheme):
         y_pred, y_true = pred_and_labels
         loss = LambdaLoss(weighing_scheme=scheme)(y_pred, y_true)
+        assert loss.shape == ()
+        assert torch.isfinite(loss)
+
+    def test_ndcg2pp_constructor(self, pred_and_labels):
+        y_pred, y_true = pred_and_labels
+        loss_fn = LambdaLoss.ndcg2pp(k=5, mu=10.0)
+        assert loss_fn.weighing_scheme == "ndcgLoss2++"
+        assert loss_fn.k == 5
+        assert loss_fn.mu == 10.0
+        loss = loss_fn(y_pred, y_true)
         assert loss.shape == ()
         assert torch.isfinite(loss)
 

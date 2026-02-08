@@ -66,7 +66,16 @@ class ListNetLoss(nn.Module):
     allRank-faithful ListNet (top-1 probability variant).
 
     Cross-entropy between softmax(labels) and softmax(predictions).
+
+    Args:
+        label_smoothing: mix factor with uniform distribution (0 = no smoothing).
+            Smoothed target = (1 - alpha) * softmax(labels) + alpha * uniform.
+            Helps with noisy relevance labels.
     """
+
+    def __init__(self, label_smoothing=0.0):
+        super().__init__()
+        self.label_smoothing = label_smoothing
 
     def forward(self, y_pred, y_true):
         y_pred_c = y_pred.clone()
@@ -78,6 +87,11 @@ class ListNetLoss(nn.Module):
 
         preds_smax = F.softmax(y_pred_c, dim=1)
         true_smax = F.softmax(y_true_c, dim=1)
+
+        if self.label_smoothing > 0:
+            n_valid = (~padded).float().sum(dim=1, keepdim=True).clamp(min=1)
+            uniform = (~padded).float() / n_valid
+            true_smax = (1 - self.label_smoothing) * true_smax + self.label_smoothing * uniform
 
         preds_log = torch.log(preds_smax + 1e-10)
 
