@@ -4,8 +4,12 @@ Full demo: GAM, SubmodularRankingGAM, and MultiObjectiveRankingGAM
 on MSLR-WEB10K with diversity evaluation and visualization.
 
 Usage:
-    python examples/demo.py              # quick demo (3 epochs)
-    python examples/demo.py --epochs 30  # production quality
+    python examples/demo.py                    # run all 3 demos
+    python examples/demo.py --demo gam         # only GAM
+    python examples/demo.py --demo submodular  # only SubmodularRankingGAM
+    python examples/demo.py --demo multi       # only MultiObjectiveRankingGAM
+    python examples/demo.py --demo gam,multi   # GAM + Multi-Objective
+    python examples/demo.py --epochs 30        # production quality
 """
 
 import argparse
@@ -28,22 +32,11 @@ from ranking_gam.viz import (
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+DEMO_CHOICES = {"gam", "submodular", "multi"}
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--epochs", type=int, default=3)
-    parser.add_argument("--k", type=int, default=10)
-    parser.add_argument("--queries-per-epoch", type=int, default=400)
-    args = parser.parse_args()
 
-    EPOCHS = args.epochs
-    K = args.k
-    QUERIES_PER_EPOCH = args.queries_per_epoch
-    results = {}
-
-    # =========================================================================
-    # Data
-    # =========================================================================
+def load_data():
+    """Load MSLR-WEB10K and create augmented features with synthetic groupwise columns."""
     print("=" * 70)
     print("Loading MSLR-WEB10K + Creating Synthetic Groupwise Features")
     print("=" * 70)
@@ -56,8 +49,6 @@ def main():
     eval_loader = DataLoader(eval_ds, batch_size=32, shuffle=False)
 
     # Synthetic groupwise features (MSLR has no category/brand)
-    num_base = 136
-
     f0_flat = train_X[:, :, 0].flatten()
     f5_flat = train_X[:, :, 5].flatten()
     f0_bins = np.digitize(
@@ -91,7 +82,21 @@ def main():
 
     X_flat = train_X.reshape(-1, 136)
 
-    groupwise_specs = [
+    return {
+        "train_X": train_X,
+        "train_y": train_y,
+        "eval_X": eval_X,
+        "eval_y": eval_y,
+        "train_loader": train_loader,
+        "eval_loader": eval_loader,
+        "train_X_aug": train_X_aug,
+        "eval_X_aug": eval_X_aug,
+        "X_flat": X_flat,
+    }
+
+
+def groupwise_specs(num_base=136):
+    return [
         {
             "name": "category_novelty",
             "type": "category_novelty",
@@ -115,36 +120,44 @@ def main():
         },
     ]
 
-    # =========================================================================
-    # Demo 1: GAM
-    # =========================================================================
+
+# =========================================================================
+# Individual demos
+# =========================================================================
+
+def demo_gam(data, epochs, K):
+    """Demo 1: GAM -- Interpretable Ranking."""
     print("\n" + "=" * 70)
     print("Demo 1: GAM -- Interpretable Ranking")
     print("=" * 70)
 
     gam = rg.GAM_Paper(num_features=136, hidden_dims=[16, 8])
     gam_ndcg = rg.train_model(
-        gam, train_loader, eval_loader, rg.ListNetLoss(),
-        epochs=EPOCHS, patience=7, device=device,
+        gam, data["train_loader"], data["eval_loader"], rg.ListNetLoss(),
+        epochs=epochs, patience=7, device=device,
     )
-    results["GAM_ListNet"] = gam_ndcg
     print(f"\nGAM (ListNet): NDCG@{K} = {gam_ndcg:.4f}")
 
-    fig_gam = plot_response_curves(gam, feature_names=MSLR_FEATURE_NAMES, data=X_flat, top_k=15)
-    fig_gam.savefig("response_curves_gam.png", dpi=150, bbox_inches="tight")
-    plt.close(fig_gam)
+    fig = plot_response_curves(
+        gam, feature_names=MSLR_FEATURE_NAMES, data=data["X_flat"], top_k=15,
+    )
+    fig.savefig("response_curves_gam.png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
     print("  Saved: response_curves_gam.png")
 
-    # =========================================================================
-    # Demo 2: SubmodularRankingGAM
-    # =========================================================================
+    return {"GAM_ListNet": gam_ndcg}
+
+
+def demo_submodular(data, epochs, K, queries_per_epoch):
+    """Demo 2: SubmodularRankingGAM -- Diversity with Greedy Guarantees."""
     print("\n" + "=" * 70)
     print("Demo 2: SubmodularRankingGAM -- Diversity with Greedy Guarantees")
     print("=" * 70)
 
+    num_base = 136
     submod = rg.SubmodularRankingGAM(
         num_item_features=num_base,
-        groupwise_specs=groupwise_specs,
+        groupwise_specs=groupwise_specs(num_base),
         item_hidden=[16, 8],
         num_knots=8,
         train_mode="pointwise",
@@ -152,38 +165,40 @@ def main():
 
     # Phase 1: base towers
     submod_ndcg = rg.train_model(
-        submod, train_loader, eval_loader, rg.ListNetLoss(),
-        epochs=EPOCHS, patience=7, device=device,
+        submod, data["train_loader"], data["eval_loader"], rg.ListNetLoss(),
+        epochs=epochs, patience=7, device=device,
     )
-    results["SubmodularGAM_base"] = submod_ndcg
 
     # Phase 2: diversity towers
     submod = rg.train_diversity_towers(
-        submod, train_X_aug, train_y,
-        epochs=EPOCHS, lr=0.003, k=K, queries_per_epoch=QUERIES_PER_EPOCH,
+        submod, data["train_X_aug"], data["train_y"],
+        epochs=epochs, lr=0.003, k=K, queries_per_epoch=queries_per_epoch,
     )
 
-    base_orders = rg.get_base_ranking(submod, eval_X_aug, eval_y, k=K, device=device)
-    greedy_orders = rg.get_greedy_ranking(submod, eval_X_aug, k=K, device=device)
+    base_orders = rg.get_base_ranking(
+        submod, data["eval_X_aug"], data["eval_y"], k=K, device=device,
+    )
+    greedy_orders = rg.get_greedy_ranking(
+        submod, data["eval_X_aug"], k=K, device=device,
+    )
 
     base_metrics = rg.evaluate_ranking_diversity(
-        eval_X_aug, eval_y, base_orders, k=K,
+        data["eval_X_aug"], data["eval_y"], base_orders, k=K,
         cat_col=num_base, brand_col=num_base + 1, price_col=10,
     )
     greedy_metrics = rg.evaluate_ranking_diversity(
-        eval_X_aug, eval_y, greedy_orders, k=K,
+        data["eval_X_aug"], data["eval_y"], greedy_orders, k=K,
         cat_col=num_base, brand_col=num_base + 1, price_col=10,
     )
 
-    results["SubmodularGAM_greedy"] = greedy_metrics["ndcg"]
     print_diversity_comparison(base_metrics, greedy_metrics)
 
-    fig_spider = plot_spider(
+    fig = plot_spider(
         {"Base": base_metrics, "Greedy": greedy_metrics},
         title="SubmodularRankingGAM: Base vs Greedy",
     )
-    fig_spider.savefig("spider_base_vs_greedy.png", dpi=150, bbox_inches="tight")
-    plt.close(fig_spider)
+    fig.savefig("spider_base_vs_greedy.png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
     print("  Saved: spider_base_vs_greedy.png")
 
     fig_div = plot_diversity_curves(submod)
@@ -191,13 +206,19 @@ def main():
     plt.close(fig_div)
     print("  Saved: diversity_curves.png")
 
-    # =========================================================================
-    # Demo 3: Multi-Objective
-    # =========================================================================
+    return {
+        "SubmodularGAM_base": submod_ndcg,
+        "SubmodularGAM_greedy": greedy_metrics["ndcg"],
+    }
+
+
+def demo_multi_objective(data, epochs, K, queries_per_epoch):
+    """Demo 3: Multi-Objective Ranking GAM."""
     print("\n" + "=" * 70)
     print("Demo 3: Multi-Objective Ranking GAM")
     print("=" * 70)
 
+    num_base = 136
     mo_objectives = [
         {
             "name": "relevance",
@@ -255,11 +276,10 @@ def main():
     ).to(device)
 
     rg.train_multi_objective(
-        mo_model, train_X_aug, train_y,
-        epochs=EPOCHS, lr=0.003, k=K, queries_per_epoch=QUERIES_PER_EPOCH,
+        mo_model, data["train_X_aug"], data["train_y"],
+        epochs=epochs, lr=0.003, k=K, queries_per_epoch=queries_per_epoch,
     )
 
-    # Weight scenarios
     scenarios = {
         "Max Revenue": {"relevance": 0.20, "revenue": 0.70, "diversity": 0.05, "freshness": 0.05},
         "Balanced": {"relevance": 0.35, "revenue": 0.35, "diversity": 0.20, "freshness": 0.10},
@@ -271,36 +291,98 @@ def main():
     for name, w in scenarios.items():
         orders = []
         with torch.no_grad():
-            for qi in range(min(500, len(eval_X_aug))):
-                x_q = torch.from_numpy(eval_X_aug[qi : qi + 1]).float().to(device)
+            for qi in range(min(500, len(data["eval_X_aug"]))):
+                x_q = torch.from_numpy(data["eval_X_aug"][qi : qi + 1]).float().to(device)
                 order = mo_model.greedy_rerank(x_q, k=K, weights=w)
                 orders.append([o for o in order[0].tolist() if o >= 0])
 
         m = rg.evaluate_ranking_diversity(
-            eval_X_aug[: len(orders)], eval_y[: len(orders)], orders, k=K,
+            data["eval_X_aug"][: len(orders)], data["eval_y"][: len(orders)],
+            orders, k=K,
             cat_col=num_base, brand_col=num_base + 1, price_col=10,
         )
         scenario_metrics[name] = m
         print(f"  {name:<18} NDCG={m['ndcg']:.4f}  ILD={m['ild']:.4f}")
 
-    fig_mo = plot_spider(
+    fig = plot_spider(
         scenario_metrics,
         title="Multi-Objective: Weight Scenarios",
         colors=["#3498db", "#2ecc71", "#e74c3c", "#f39c12"],
     )
-    fig_mo.savefig("spider_weight_scenarios.png", dpi=150, bbox_inches="tight")
-    plt.close(fig_mo)
+    fig.savefig("spider_weight_scenarios.png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
     print("  Saved: spider_weight_scenarios.png")
 
-    # =========================================================================
+    return {}
+
+
+# =========================================================================
+# Main
+# =========================================================================
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="ranking_gam demo",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Demo choices:
+  gam          GAM with response curve visualization
+  submodular   SubmodularRankingGAM with diversity evaluation
+  multi        Multi-Objective Ranking GAM with weight scenarios
+
+Examples:
+  python examples/demo.py --demo gam
+  python examples/demo.py --demo submodular,multi
+  python examples/demo.py --demo all --epochs 30
+        """,
+    )
+    parser.add_argument(
+        "--demo",
+        type=str,
+        default="all",
+        help="comma-separated demos to run: gam,submodular,multi,all (default: all)",
+    )
+    parser.add_argument("--epochs", type=int, default=3)
+    parser.add_argument("--k", type=int, default=10)
+    parser.add_argument("--queries-per-epoch", type=int, default=400)
+    args = parser.parse_args()
+
+    # Parse demo selection
+    if args.demo == "all":
+        demos = DEMO_CHOICES
+    else:
+        demos = {d.strip() for d in args.demo.split(",")}
+        unknown = demos - DEMO_CHOICES
+        if unknown:
+            parser.error(f"Unknown demo(s): {unknown}. Choose from: {DEMO_CHOICES}")
+
+    EPOCHS = args.epochs
+    K = args.k
+    QPE = args.queries_per_epoch
+
+    print(f"Running demos: {', '.join(sorted(demos))}")
+    print(f"Config: epochs={EPOCHS}, k={K}, queries_per_epoch={QPE}\n")
+
+    data = load_data()
+    results = {}
+
+    if "gam" in demos:
+        results.update(demo_gam(data, EPOCHS, K))
+
+    if "submodular" in demos:
+        results.update(demo_submodular(data, EPOCHS, K, QPE))
+
+    if "multi" in demos:
+        results.update(demo_multi_objective(data, EPOCHS, K, QPE))
+
     # Summary
-    # =========================================================================
-    print("\n" + "=" * 70)
-    print("RESULTS")
-    print("=" * 70)
-    for name, ndcg in sorted(results.items(), key=lambda x: -x[1]):
-        print(f"  {name:<28} NDCG@{K} = {ndcg:.4f}")
-    print(f"\n  (Set --epochs 30 for production-quality results)")
+    if results:
+        print("\n" + "=" * 70)
+        print("RESULTS")
+        print("=" * 70)
+        for name, ndcg in sorted(results.items(), key=lambda x: -x[1]):
+            print(f"  {name:<28} NDCG@{K} = {ndcg:.4f}")
+        print(f"\n  (Set --epochs 30 for production-quality results)")
 
 
 if __name__ == "__main__":
