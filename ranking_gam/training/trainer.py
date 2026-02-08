@@ -138,6 +138,8 @@ def train_model(
 
 def train_diversity_towers(
     model, X_aug, y, epochs=10, lr=0.003, k=10, queries_per_epoch=300,
+    grad_clip=1.0, lr_schedule="constant", warmup_epochs=1,
+    weight_decay=0.0,
 ):
     """
     Phase 2: Train diversity towers via step-wise ranking loss.
@@ -153,6 +155,10 @@ def train_diversity_towers(
         lr: learning rate for diversity towers
         k: number of greedy steps per query
         queries_per_epoch: subsample for speed
+        grad_clip: max gradient norm (0 to disable)
+        lr_schedule: "constant" or "cosine"
+        warmup_epochs: linear LR warmup epochs (0 to disable)
+        weight_decay: L2 weight decay for AdamW (0 uses Adam)
 
     Returns:
         model with trained diversity towers
@@ -163,7 +169,21 @@ def train_diversity_towers(
         p.requires_grad_(False)
 
     div_params = list(model.diversity_towers.parameters())
-    optimizer = torch.optim.Adam(div_params, lr=lr)
+    OptimClass = torch.optim.AdamW if weight_decay > 0 else torch.optim.Adam
+    optimizer = OptimClass(div_params, lr=lr, weight_decay=weight_decay)
+
+    scheduler = None
+    if lr_schedule == "cosine":
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=epochs, eta_min=lr * 0.01,
+        )
+
+    warmup_scheduler = None
+    if warmup_epochs > 0 and epochs > warmup_epochs:
+        warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
+            optimizer, start_factor=0.01, end_factor=1.0,
+            total_iters=warmup_epochs,
+        )
 
     print(f"\n  Phase 2: Training diversity towers ({len(div_params)} param groups)")
 
@@ -222,12 +242,19 @@ def train_diversity_towers(
             if query_loss.requires_grad:
                 optimizer.zero_grad()
                 query_loss.backward()
-                torch.nn.utils.clip_grad_norm_(div_params, 1.0)
+                if grad_clip > 0:
+                    torch.nn.utils.clip_grad_norm_(div_params, grad_clip)
                 optimizer.step()
                 total_loss += query_loss.item()
                 n_queries += 1
 
         avg_loss = total_loss / max(n_queries, 1)
+
+        # Step schedulers
+        if warmup_scheduler is not None and epoch < warmup_epochs:
+            warmup_scheduler.step()
+        elif scheduler is not None:
+            scheduler.step()
 
         if (epoch + 1) % 2 == 0 or epoch == 0:
             model.eval()
@@ -249,15 +276,45 @@ def train_diversity_towers(
 
 def train_multi_objective(
     model, X_aug, y, epochs=10, lr=0.003, k=10, queries_per_epoch=300,
+    grad_clip=1.0, lr_schedule="constant", warmup_epochs=1,
+    weight_decay=0.0,
 ):
     """
     Train all towers of a MultiObjectiveRankingGAM via step-wise ranking loss.
 
     At each greedy step, computes the weighted multi-objective marginal gain
     and trains all towers to make greedy selection agree with relevance ordering.
+
+    Args:
+        model: MultiObjectiveRankingGAM
+        X_aug: [B, L, D_aug] numpy features with groupwise columns
+        y: [B, L] numpy relevance labels
+        epochs: training epochs
+        lr: learning rate
+        k: greedy steps per query
+        queries_per_epoch: subsample for speed
+        grad_clip: max gradient norm (0 to disable)
+        lr_schedule: "constant" or "cosine"
+        warmup_epochs: linear LR warmup epochs (0 to disable)
+        weight_decay: L2 weight decay for AdamW (0 uses Adam)
     """
     device = next(model.parameters()).device
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+
+    OptimClass = torch.optim.AdamW if weight_decay > 0 else torch.optim.Adam
+    optimizer = OptimClass(model.parameters(), lr=lr, weight_decay=weight_decay)
+
+    scheduler = None
+    if lr_schedule == "cosine":
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=epochs, eta_min=lr * 0.01,
+        )
+
+    warmup_scheduler = None
+    if warmup_epochs > 0 and epochs > warmup_epochs:
+        warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
+            optimizer, start_factor=0.01, end_factor=1.0,
+            total_iters=warmup_epochs,
+        )
 
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"  Training {n_params} parameters, epochs={epochs}, lr={lr}")
@@ -327,12 +384,20 @@ def train_multi_objective(
             if query_loss.requires_grad:
                 optimizer.zero_grad()
                 query_loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                if grad_clip > 0:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
                 optimizer.step()
                 total_loss += query_loss.item()
                 n_queries += 1
 
         avg_loss = total_loss / max(n_queries, 1)
+
+        # Step schedulers
+        if warmup_scheduler is not None and epoch < warmup_epochs:
+            warmup_scheduler.step()
+        elif scheduler is not None:
+            scheduler.step()
+
         print(f"  Epoch {epoch + 1}/{epochs}: loss={avg_loss:.4f}")
 
     model.eval()
