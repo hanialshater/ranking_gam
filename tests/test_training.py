@@ -153,21 +153,87 @@ class TestTrainModelCosineSchedule:
         assert isinstance(ndcg, float)
 
 
+def _make_submod(X_aug):
+    D_item = X_aug.shape[-1] - 2
+    specs = [
+        {"name": "cat_nov", "type": "category_novelty", "column": D_item, "x_min": 0, "x_max": 1},
+    ]
+    return SubmodularRankingGAM(
+        num_item_features=D_item, groupwise_specs=specs,
+        item_hidden=[8, 4], num_knots=3,
+    )
+
+
+def _make_mo(X_aug):
+    D_item = X_aug.shape[-1] - 2
+    objectives = [
+        {
+            "name": "rel", "type": "pointwise",
+            "features": list(range(D_item)), "tower": "mlp", "weight": 0.7,
+        },
+        {
+            "name": "div", "type": "groupwise",
+            "groupwise_specs": [
+                {"name": "cat_nov", "type": "category_novelty", "column": D_item, "x_min": 0, "x_max": 1},
+            ],
+            "weight": 0.3,
+        },
+    ]
+    return MultiObjectiveRankingGAM(
+        objectives=objectives, num_item_features=D_item,
+        hidden_dims=[8, 4], num_knots=3,
+    )
+
+
+_DIV_KW = dict(epochs=1, lr=0.01, k=3, queries_per_epoch=8)
+
+
 class TestTrainDiversityTowers:
     def test_phase2(self, synthetic_augmented):
         X_aug, y = synthetic_augmented
-        D_item = X_aug.shape[-1] - 2
-        specs = [
-            {"name": "cat_nov", "type": "category_novelty", "column": D_item, "x_min": 0, "x_max": 1},
-        ]
-        model = SubmodularRankingGAM(
-            num_item_features=D_item, groupwise_specs=specs,
-            item_hidden=[8, 4], num_knots=3,
-        )
-        # Phase 2 only — train diversity towers
+        model = _make_submod(X_aug)
+        model = train_diversity_towers(model, X_aug, y, **_DIV_KW)
+        assert model is not None
+
+    def test_cosine_schedule(self, synthetic_augmented):
+        X_aug, y = synthetic_augmented
+        model = _make_submod(X_aug)
         model = train_diversity_towers(
-            model, X_aug, y,
-            epochs=1, lr=0.01, k=3, queries_per_epoch=8,
+            model, X_aug, y, **_DIV_KW, lr_schedule="cosine",
+        )
+        assert model is not None
+
+    def test_weight_decay(self, synthetic_augmented):
+        X_aug, y = synthetic_augmented
+        model = _make_submod(X_aug)
+        model = train_diversity_towers(
+            model, X_aug, y, **_DIV_KW, weight_decay=0.01,
+        )
+        assert model is not None
+
+    def test_warmup(self, synthetic_augmented):
+        X_aug, y = synthetic_augmented
+        model = _make_submod(X_aug)
+        model = train_diversity_towers(
+            model, X_aug, y, epochs=3, lr=0.01, k=3, queries_per_epoch=8,
+            warmup_epochs=1,
+        )
+        assert model is not None
+
+    def test_grad_clip_disabled(self, synthetic_augmented):
+        X_aug, y = synthetic_augmented
+        model = _make_submod(X_aug)
+        model = train_diversity_towers(
+            model, X_aug, y, **_DIV_KW, grad_clip=0,
+        )
+        assert model is not None
+
+    def test_all_enhancements(self, synthetic_augmented):
+        X_aug, y = synthetic_augmented
+        model = _make_submod(X_aug)
+        model = train_diversity_towers(
+            model, X_aug, y, epochs=3, lr=0.01, k=3, queries_per_epoch=8,
+            lr_schedule="cosine", weight_decay=0.01, warmup_epochs=1,
         )
         assert model is not None
 
@@ -175,26 +241,40 @@ class TestTrainDiversityTowers:
 class TestTrainMultiObjective:
     def test_basic(self, synthetic_augmented):
         X_aug, y = synthetic_augmented
-        D_item = X_aug.shape[-1] - 2
-        objectives = [
-            {
-                "name": "rel", "type": "pointwise",
-                "features": list(range(D_item)), "tower": "mlp", "weight": 0.7,
-            },
-            {
-                "name": "div", "type": "groupwise",
-                "groupwise_specs": [
-                    {"name": "cat_nov", "type": "category_novelty", "column": D_item, "x_min": 0, "x_max": 1},
-                ],
-                "weight": 0.3,
-            },
-        ]
-        model = MultiObjectiveRankingGAM(
-            objectives=objectives, num_item_features=D_item,
-            hidden_dims=[8, 4], num_knots=3,
-        )
+        model = _make_mo(X_aug)
+        model = train_multi_objective(model, X_aug, y, **_DIV_KW)
+        assert model is not None
+
+    def test_cosine_schedule(self, synthetic_augmented):
+        X_aug, y = synthetic_augmented
+        model = _make_mo(X_aug)
         model = train_multi_objective(
-            model, X_aug, y,
-            epochs=1, lr=0.01, k=3, queries_per_epoch=8,
+            model, X_aug, y, **_DIV_KW, lr_schedule="cosine",
+        )
+        assert model is not None
+
+    def test_weight_decay(self, synthetic_augmented):
+        X_aug, y = synthetic_augmented
+        model = _make_mo(X_aug)
+        model = train_multi_objective(
+            model, X_aug, y, **_DIV_KW, weight_decay=0.01,
+        )
+        assert model is not None
+
+    def test_warmup(self, synthetic_augmented):
+        X_aug, y = synthetic_augmented
+        model = _make_mo(X_aug)
+        model = train_multi_objective(
+            model, X_aug, y, epochs=3, lr=0.01, k=3, queries_per_epoch=8,
+            warmup_epochs=1,
+        )
+        assert model is not None
+
+    def test_all_enhancements(self, synthetic_augmented):
+        X_aug, y = synthetic_augmented
+        model = _make_mo(X_aug)
+        model = train_multi_objective(
+            model, X_aug, y, epochs=3, lr=0.01, k=3, queries_per_epoch=8,
+            lr_schedule="cosine", weight_decay=0.01, warmup_epochs=1,
         )
         assert model is not None

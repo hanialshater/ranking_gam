@@ -217,6 +217,8 @@ def demo_submodular(data, epochs, K, queries_per_epoch,
     submod = rg.train_diversity_towers(
         submod, data["train_X_aug"], data["train_y"],
         epochs=epochs, lr=0.003, k=K, queries_per_epoch=queries_per_epoch,
+        lr_schedule="cosine" if cosine else "constant",
+        weight_decay=weight_decay,
     )
 
     base_orders = rg.get_base_ranking(
@@ -256,7 +258,9 @@ def demo_submodular(data, epochs, K, queries_per_epoch,
     }
 
 
-def demo_multi_objective(data, epochs, K, queries_per_epoch):
+def demo_multi_objective(data, epochs, K, queries_per_epoch,
+                         transforms=True, residual=True, cosine=True,
+                         l1_reg=0.001, label_smoothing=0.1, weight_decay=0.01):
     """Demo 3: Multi-Objective Ranking GAM."""
     print("\n" + "=" * 70)
     print("Demo 3: Multi-Objective Ranking GAM")
@@ -322,6 +326,8 @@ def demo_multi_objective(data, epochs, K, queries_per_epoch):
     rg.train_multi_objective(
         mo_model, data["train_X_aug"], data["train_y"],
         epochs=epochs, lr=0.003, k=K, queries_per_epoch=queries_per_epoch,
+        lr_schedule="cosine" if cosine else "constant",
+        weight_decay=weight_decay,
     )
 
     scenarios = {
@@ -613,7 +619,7 @@ Examples:
         results.update(demo_submodular(data, EPOCHS, K, QPE, **enhance_kw))
 
     if "multi" in demos:
-        results.update(demo_multi_objective(data, EPOCHS, K, QPE))
+        results.update(demo_multi_objective(data, EPOCHS, K, QPE, **enhance_kw))
 
     if "gbdt" in demos:
         results.update(demo_gbdt(data, EPOCHS, K, **enhance_kw))
