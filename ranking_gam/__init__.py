@@ -50,6 +50,9 @@ def __getattr__(name):
         "train_multi_objective": (".training", "train_multi_objective"),
         "get_base_ranking": (".training", "get_base_ranking"),
         "get_greedy_ranking": (".training", "get_greedy_ranking"),
+        "train_gbdt_baseline": (".training", "train_gbdt_baseline"),
+        "train_gbdt_residual_boost": (".training", "train_gbdt_residual_boost"),
+        "compute_gbdt_residual_feature": (".training", "compute_gbdt_residual_feature"),
         # Distillation
         "greedy_knot_selection": (".distill", "greedy_knot_selection"),
         "distill_to_pwl": (".distill", "distill_to_pwl"),
@@ -105,6 +108,9 @@ __all__ = [
     "train_multi_objective",
     "get_base_ranking",
     "get_greedy_ranking",
+    "train_gbdt_baseline",
+    "train_gbdt_residual_boost",
+    "compute_gbdt_residual_feature",
     # Distillation
     "greedy_knot_selection",
     "distill_to_pwl",

@@ -39,7 +39,7 @@ from ranking_gam.viz import (
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-DEMO_CHOICES = {"gam", "submodular", "multi"}
+DEMO_CHOICES = {"gam", "submodular", "multi", "gbdt"}
 
 
 def load_data():
@@ -352,6 +352,106 @@ def demo_multi_objective(data, epochs, K, queries_per_epoch):
     return {}
 
 
+def demo_gbdt(data, epochs, K, transforms=False, residual=False, cosine=False, l1_reg=0.0):
+    """Demo 4: GBDT baseline + residual-boosted GAM."""
+    print("\n" + "=" * 70)
+    print("Demo 4: GBDT Baseline + Residual-Boosted GAM")
+    print("=" * 70)
+
+    from ranking_gam.training.boosting import (
+        train_gbdt_baseline,
+        train_gbdt_residual_boost,
+    )
+
+    # GBDT baseline (LambdaMART)
+    print("\n  Training LambdaMART baseline...")
+    gbdt_model, gbdt_ndcg = train_gbdt_baseline(
+        data["train_X"], data["train_y"],
+        data["eval_X"], data["eval_y"],
+        k=K, n_estimators=300,
+    )
+
+    # GAM baseline
+    print("\n  Training GAM baseline...")
+    gam = rg.GAM_Paper(
+        num_features=136, hidden_dims=[16, 8],
+        feature_transforms=transforms, residual=residual,
+    )
+    if transforms:
+        gam.init_transforms_from_data(data["train_X"])
+
+    def make_loaders(X, y):
+        ds = TensorDataset(torch.from_numpy(X), torch.from_numpy(y))
+        train_l = DataLoader(ds, batch_size=32, shuffle=True)
+        eval_ds = TensorDataset(torch.from_numpy(data["eval_X"]), torch.from_numpy(data["eval_y"]))
+        eval_l = DataLoader(eval_ds, batch_size=32)
+        return train_l, eval_l
+
+    train_loader, eval_loader = make_loaders(data["train_X"], data["train_y"])
+    gam_ndcg = rg.train_model(
+        gam, train_loader, eval_loader, rg.ListNetLoss(),
+        epochs=epochs, patience=7, device=device,
+        lr_schedule="cosine" if cosine else "constant",
+        l1_output_reg=l1_reg,
+    )
+    print(f"\n  GAM: NDCG@{K} = {gam_ndcg:.4f}")
+
+    # Residual-boosted GAM
+    print("\n  Training residual-boosted GAM (GAM + GBDT tower)...")
+    from ranking_gam.training.boosting import compute_gbdt_residual_feature
+
+    train_X_boosted = compute_gbdt_residual_feature(gbdt_model, data["train_X"])
+    eval_X_boosted = compute_gbdt_residual_feature(gbdt_model, data["eval_X"])
+
+    boosted_gam = rg.GAM_Paper(
+        num_features=137, hidden_dims=[16, 8],
+        feature_transforms=transforms, residual=residual,
+    )
+    if transforms:
+        boosted_gam.init_transforms_from_data(train_X_boosted)
+
+    def make_loaders_boosted(X, y):
+        ds = TensorDataset(torch.from_numpy(X), torch.from_numpy(y))
+        train_l = DataLoader(ds, batch_size=32, shuffle=True)
+        eval_ds = TensorDataset(torch.from_numpy(eval_X_boosted), torch.from_numpy(data["eval_y"]))
+        eval_l = DataLoader(eval_ds, batch_size=32)
+        return train_l, eval_l
+
+    train_loader_b, eval_loader_b = make_loaders_boosted(train_X_boosted, data["train_y"])
+    boosted_ndcg = rg.train_model(
+        boosted_gam, train_loader_b, eval_loader_b, rg.ListNetLoss(),
+        epochs=epochs, patience=7, device=device,
+        lr_schedule="cosine" if cosine else "constant",
+        l1_output_reg=l1_reg,
+    )
+
+    print(f"\n  Summary:")
+    print(f"    GAM only:             NDCG@{K} = {gam_ndcg:.4f}")
+    print(f"    GBDT (LambdaMART):    NDCG@{K} = {gbdt_ndcg:.4f}")
+    print(f"    GAM + GBDT tower:     NDCG@{K} = {boosted_ndcg:.4f}")
+
+    # Plot response curve for the GBDT tower (feature 136)
+    boosted_gam.eval()
+    fig, ax = plt.subplots(1, 1, figsize=(6, 4))
+    x_vals = np.linspace(0, 1, 100).astype(np.float32)
+    effect = boosted_gam.get_main_effect(136, x_vals)
+    ax.plot(x_vals, effect, linewidth=2)
+    ax.set_xlabel("GBDT score (normalized)")
+    ax.set_ylabel("Tower output")
+    ax.set_title("GBDT Residual Tower: f_gbdt(score)")
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    fig.savefig("gbdt_tower_response.png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print("  Saved: gbdt_tower_response.png")
+
+    return {
+        "GAM_only": gam_ndcg,
+        "GBDT_LambdaMART": gbdt_ndcg,
+        "GAM+GBDT_tower": boosted_ndcg,
+    }
+
+
 # =========================================================================
 # Main
 # =========================================================================
@@ -365,12 +465,14 @@ Demo choices:
   gam          GAM with response curve visualization
   submodular   SubmodularRankingGAM with diversity evaluation
   multi        Multi-Objective Ranking GAM with weight scenarios
+  gbdt         GBDT baseline + residual-boosted GAM (requires lightgbm)
 
 Examples:
   python examples/demo.py --demo gam
   python examples/demo.py --demo submodular,multi
   python examples/demo.py --demo all --epochs 30
   python examples/demo.py --demo gam --transforms --cosine --residual
+  python examples/demo.py --demo gbdt --epochs 10
         """,
     )
     parser.add_argument(
@@ -433,6 +535,9 @@ Examples:
 
     if "multi" in demos:
         results.update(demo_multi_objective(data, EPOCHS, K, QPE))
+
+    if "gbdt" in demos:
+        results.update(demo_gbdt(data, EPOCHS, K, **enhance_kw))
 
     # Summary
     if results:

@@ -7,6 +7,11 @@ from .trainer import (
     get_base_ranking,
     get_greedy_ranking,
 )
+from .boosting import (
+    train_gbdt_baseline,
+    train_gbdt_residual_boost,
+    compute_gbdt_residual_feature,
+)
 
 __all__ = [
     "train_model",
@@ -14,4 +19,7 @@ __all__ = [
     "train_multi_objective",
     "get_base_ranking",
     "get_greedy_ranking",
+    "train_gbdt_baseline",
+    "train_gbdt_residual_boost",
+    "compute_gbdt_residual_feature",
 ]
