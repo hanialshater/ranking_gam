@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ranking-gam"
+version = "0.1.0"
+description = "Interpretable Ranking with Generalized Additive Models"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+
+dependencies = [
+    "torch>=2.0",
+    "numpy>=1.24",
+    "scipy>=1.10",
+]
+
+[project.optional-dependencies]
+data = ["lightgbm>=4.0"]
+viz = ["matplotlib>=3.7"]
+all = ["ranking-gam[data,viz]"]
+dev = [
+    "ranking-gam[all]",
+    "pytest>=7.0",
+    "ruff>=0.4",
+]
+
+[tool.setuptools.packages.find]
+include = ["ranking_gam*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
