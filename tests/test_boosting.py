@@ -88,7 +88,6 @@ class TestResidualBoost:
 
         assert "boosted_model" in result
         assert "gbdt_model" in result
-        assert "stage1_ndcg" in result
         assert "gbdt_ndcg" in result
         assert "boosted_ndcg" in result
         assert isinstance(result["boosted_ndcg"], float)

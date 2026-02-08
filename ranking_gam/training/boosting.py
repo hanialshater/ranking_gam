@@ -1,28 +1,14 @@
 """
-GBDT baseline and residual boosting for GAM models.
+GBDT baseline and boosted GAM models.
 
 Provides:
   - train_gbdt_baseline: train a LambdaMART ranker as a performance ceiling
-  - train_gbdt_residual_boost: train GAM, compute residuals, train GBDT on
-    residuals, then retrain GAM with GBDT residual as an extra feature tower
+  - train_gbdt_residual_boost: train GBDT first, then GAM with GBDT score
+    as an extra interpretable feature tower
 """
 
 import numpy as np
 import torch
-
-
-def _gam_predict(model, X, device=None):
-    """Get GAM scores for [B, L, D] numpy array -> [B, L] numpy."""
-    if device is None:
-        device = next(model.parameters()).device
-    model.eval()
-    scores = []
-    with torch.no_grad():
-        for qi in range(len(X)):
-            x_q = torch.from_numpy(X[qi : qi + 1]).float().to(device)
-            s = model(x_q).squeeze(0).cpu().numpy()
-            scores.append(s)
-    return np.array(scores)
 
 
 def train_gbdt_baseline(train_X, train_y, eval_X, eval_y, k=10, **lgbm_kwargs):
@@ -164,17 +150,16 @@ def train_gbdt_residual_boost(
     device=None, **train_kwargs,
 ):
     """
-    Two-stage residual boosting: GAM + GBDT residual tower.
+    Two-stage boosting: GBDT first, then GAM with GBDT score tower.
 
-    Stage 1: Train GAM on raw features
-    Stage 2: Train GBDT on GAM residuals, append GBDT score as extra feature
-    Stage 3: Retrain GAM with D+1 features (original + GBDT residual)
+    Stage 1: Train GBDT (LambdaMART) on raw features
+    Stage 2: Append normalized GBDT scores as feature D+1, train GAM on D+1
 
     The GBDT score gets its own interpretable tower -- you can plot f_gbdt(x)
-    to see how much the model relies on the black-box correction.
+    to see how much the model relies on the black-box signal.
 
     Args:
-        model: GAM_Paper (or similar) with num_features=D
+        model: GAM_Paper (or similar) with num_features=D (used to infer config)
         train_X: [B, L, D] numpy features
         train_y: [B, L] numpy labels
         eval_X: [B, L, D] numpy features
@@ -182,18 +167,17 @@ def train_gbdt_residual_boost(
         train_loader_fn: callable(X, y) -> (train_loader, val_loader)
         loss_fn: ranking loss module
         k: NDCG cutoff
-        gam_epochs: epochs for GAM training (stages 1 and 3)
-        boost_epochs: epochs for boosted GAM (stage 3)
+        gam_epochs: epochs for GAM training (stage 2)
+        boost_epochs: (unused, kept for API compat)
         device: torch device
         **train_kwargs: extra kwargs for train_model
 
     Returns:
         dict with:
-            "boosted_model": retrained GAM with D+1 features
+            "boosted_model": GAM with D+1 features (original + GBDT score)
             "gbdt_model": fitted LGBMRanker
-            "stage1_ndcg": GAM-only NDCG
             "gbdt_ndcg": GBDT-only NDCG
-            "boosted_ndcg": boosted GAM NDCG
+            "boosted_ndcg": GAM+GBDT tower NDCG
     """
     from .trainer import train_model
     from ..models import GAM_Paper
@@ -203,48 +187,18 @@ def train_gbdt_residual_boost(
 
     D = train_X.shape[-1]
 
-    # --- Stage 1: Train base GAM ---
-    print("\n  Stage 1: Training base GAM...")
-    train_loader, val_loader = train_loader_fn(train_X, train_y)
-    stage1_ndcg = train_model(
-        model, train_loader, val_loader, loss_fn,
-        epochs=gam_epochs, device=device, **train_kwargs,
-    )
-    print(f"  Stage 1 GAM: NDCG@{k} = {stage1_ndcg:.4f}")
-
-    # --- Stage 2: Train GBDT on residuals ---
-    print("\n  Stage 2: Training GBDT on residuals...")
-    gam_scores = _gam_predict(model, train_X, device)
-    eval_gam_scores = _gam_predict(model, eval_X, device)
-
-    # Residual = true relevance - GAM score (normalized)
-    # We train GBDT to predict what GAM misses
-    residuals = train_y.copy().astype(np.float32)
-    valid = train_y >= 0
-    # Normalize GAM scores to label scale for residual computation
-    if valid.any():
-        gam_norm = gam_scores.copy()
-        gam_mean = gam_norm[valid].mean()
-        gam_std = max(gam_norm[valid].std(), 1e-6)
-        y_mean = residuals[valid].mean()
-        y_std = max(residuals[valid].std(), 1e-6)
-        gam_norm = (gam_norm - gam_mean) / gam_std * y_std + y_mean
-        residuals[valid] = residuals[valid] - gam_norm[valid]
-    residuals[~valid] = -1
-
+    # --- Stage 1: Train GBDT on raw features ---
+    print("\n  Stage 1: Training GBDT (LambdaMART)...")
     gbdt_model, gbdt_ndcg = train_gbdt_baseline(
         train_X, train_y, eval_X, eval_y, k=k,
     )
 
-    # --- Stage 3: Retrain GAM with GBDT score as extra feature ---
-    print("\n  Stage 3: Retraining GAM with GBDT residual tower...")
+    # --- Stage 2: Train GAM with GBDT score as extra feature tower ---
+    print("\n  Stage 2: Training GAM with GBDT score tower (D+1 features)...")
     train_X_boosted = compute_gbdt_residual_feature(gbdt_model, train_X)
     eval_X_boosted = compute_gbdt_residual_feature(gbdt_model, eval_X)
 
-    # Build new model with D+1 features
-    # Copy model config from original
-    hidden_dims = model.towers[0].net[0].in_features  # dummy, extract from tower
-    # Get hidden dims from tower structure
+    # Infer model config from the original model
     tower_hidden = []
     for layer in model.towers[0].net:
         if isinstance(layer, torch.nn.Linear) and layer.out_features != 1:
@@ -265,14 +219,13 @@ def train_gbdt_residual_boost(
     train_loader_b, val_loader_b = train_loader_fn(train_X_boosted, train_y)
     boosted_ndcg = train_model(
         boosted_model, train_loader_b, val_loader_b, loss_fn,
-        epochs=boost_epochs, device=device, **train_kwargs,
+        epochs=gam_epochs, device=device, **train_kwargs,
     )
     print(f"\n  Boosted GAM (with GBDT tower): NDCG@{k} = {boosted_ndcg:.4f}")
 
     return {
         "boosted_model": boosted_model,
         "gbdt_model": gbdt_model,
-        "stage1_ndcg": float(stage1_ndcg),
         "gbdt_ndcg": float(gbdt_ndcg),
         "boosted_ndcg": float(boosted_ndcg),
     }

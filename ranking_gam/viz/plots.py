@@ -52,7 +52,15 @@ def plot_response_curves(
     for j in range(num_features):
         if data is not None:
             col = data[:, j] if isinstance(data, np.ndarray) else data[:, j].cpu().numpy()
-            x_lo, x_hi = float(np.min(col)), float(np.max(col))
+            # Use percentiles to cover most of the density without zooming
+            # out too far into sparse tails where curves can be wild
+            x_lo = float(np.percentile(col, 1))
+            x_hi = float(np.percentile(col, 99))
+            # Fallback if degenerate (constant feature)
+            if x_hi - x_lo < 1e-8:
+                x_lo, x_hi = float(np.min(col)), float(np.max(col))
+            if x_hi - x_lo < 1e-8:
+                x_lo, x_hi = x_lo - 1.0, x_hi + 1.0
         else:
             x_lo, x_hi = -3.0, 3.0
 
@@ -87,7 +95,10 @@ def plot_response_curves(
 
         if data is not None:
             col_data = data[:, j] if isinstance(data, np.ndarray) else data[:, j].cpu().numpy()
-            ax.hist(col_data, bins=50, alpha=0.15, color="steelblue", density=True)
+            # Clip histogram to the same percentile range as the curve
+            col_clipped = col_data[(col_data >= x_lo) & (col_data <= x_hi)]
+            if len(col_clipped) > 0:
+                ax.hist(col_clipped, bins=50, alpha=0.15, color="steelblue", density=True)
 
         ax.plot(x_np, y_sweep, color="#e74c3c", linewidth=1.8)
         ax.axhline(0, color="gray", linewidth=0.5, linestyle="--", alpha=0.5)
