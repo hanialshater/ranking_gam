@@ -1,6 +1,6 @@
 """Model architectures for interpretable ranking."""
 
-from .towers import PaperTower, ConcavePWL, MonotonePWL
+from .towers import PaperTower, ConcavePWL, MonotonePWL, LearnableMonotoneTransform
 from .gam import GAM_Paper, GA2M_Paper
 from .context import ContextWeightNetwork, ContextPresentGA2M
 from .groupwise import GroupwiseFeatureComputer
@@ -11,6 +11,7 @@ __all__ = [
     "PaperTower",
     "ConcavePWL",
     "MonotonePWL",
+    "LearnableMonotoneTransform",
     "GAM_Paper",
     "GA2M_Paper",
     "ContextWeightNetwork",

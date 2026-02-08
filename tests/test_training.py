@@ -27,6 +27,56 @@ class TestTrainModel:
         assert 0.0 <= ndcg <= 1.0
 
 
+class TestTrainModelCosineSchedule:
+    def test_cosine_schedule(self, synthetic_data):
+        X, y = synthetic_data
+        train_loader, val_loader = _make_loaders(X, y)
+        model = GAM_Paper(num_features=X.shape[-1], hidden_dims=[8, 4])
+        ndcg = train_model(
+            model, train_loader, val_loader, ListNetLoss(),
+            epochs=2, patience=5, device=torch.device("cpu"),
+            lr_schedule="cosine",
+        )
+        assert isinstance(ndcg, float)
+        assert 0.0 <= ndcg <= 1.0
+
+    def test_l1_output_reg(self, synthetic_data):
+        X, y = synthetic_data
+        train_loader, val_loader = _make_loaders(X, y)
+        model = GAM_Paper(num_features=X.shape[-1], hidden_dims=[8, 4])
+        ndcg = train_model(
+            model, train_loader, val_loader, ListNetLoss(),
+            epochs=2, patience=5, device=torch.device("cpu"),
+            l1_output_reg=0.01,
+        )
+        assert isinstance(ndcg, float)
+
+    def test_cosine_with_l1(self, synthetic_data):
+        X, y = synthetic_data
+        train_loader, val_loader = _make_loaders(X, y)
+        model = GAM_Paper(num_features=X.shape[-1], hidden_dims=[8, 4])
+        ndcg = train_model(
+            model, train_loader, val_loader, ListNetLoss(),
+            epochs=2, patience=5, device=torch.device("cpu"),
+            lr_schedule="cosine", l1_output_reg=0.01,
+        )
+        assert isinstance(ndcg, float)
+
+    def test_train_with_transforms(self, synthetic_data):
+        X, y = synthetic_data
+        train_loader, val_loader = _make_loaders(X, y)
+        model = GAM_Paper(
+            num_features=X.shape[-1], hidden_dims=[8, 4],
+            feature_transforms=True,
+        )
+        model.init_transforms_from_data(X)
+        ndcg = train_model(
+            model, train_loader, val_loader, ListNetLoss(),
+            epochs=2, patience=5, device=torch.device("cpu"),
+        )
+        assert isinstance(ndcg, float)
+
+
 class TestTrainDiversityTowers:
     def test_phase2(self, synthetic_augmented):
         X_aug, y = synthetic_augmented

@@ -18,6 +18,7 @@ from ..metrics import compute_ndcg
 def train_model(
     model, train_loader, val_loader, loss_fn, epochs=30, lr=0.001,
     patience=7, grad_clip=1.0, device=None,
+    lr_schedule="constant", l1_output_reg=0.0,
 ):
     """
     Standard training loop with early stopping on NDCG@10.
@@ -32,6 +33,8 @@ def train_model(
         patience: early stopping patience
         grad_clip: max gradient norm (0 to disable)
         device: torch device (auto-detected if None)
+        lr_schedule: "constant" or "cosine" (CosineAnnealingLR over epochs)
+        l1_output_reg: L1 penalty weight on predicted scores (0 to disable)
 
     Returns:
         best validation NDCG@10
@@ -41,6 +44,10 @@ def train_model(
 
     model = model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+
+    scheduler = None
+    if lr_schedule == "cosine":
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
 
     best_ndcg = 0
     best_state = None
@@ -54,6 +61,8 @@ def train_model(
             optimizer.zero_grad()
             pred = model(X)
             loss = loss_fn(pred, y)
+            if l1_output_reg > 0:
+                loss = loss + l1_output_reg * pred.abs().mean()
             loss.backward()
             if grad_clip > 0:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
@@ -61,6 +70,9 @@ def train_model(
             train_loss += loss.item()
 
         train_loss /= len(train_loader)
+
+        if scheduler is not None:
+            scheduler.step()
 
         model.eval()
         val_ndcg = []

@@ -143,6 +143,58 @@ class TestSubmodularRankingGAM:
         assert base.shape == (X.shape[0], X.shape[1])
 
 
+class TestGAMWithTransforms:
+    def test_forward_with_transforms(self, synthetic_tensors):
+        X, y = synthetic_tensors
+        B, L, D = X.shape
+        model = GAM_Paper(num_features=D, hidden_dims=[8, 4], feature_transforms=True, num_transform_knots=10)
+        out = model(X)
+        assert out.shape == (B, L)
+
+    def test_init_transforms_from_data(self, synthetic_data):
+        X, y = synthetic_data
+        D = X.shape[-1]
+        model = GAM_Paper(num_features=D, hidden_dims=[8, 4], feature_transforms=True)
+        model.init_transforms_from_data(X)
+        # Transforms should now have data-aligned knots
+        assert model.feature_transforms is not None
+        assert len(model.feature_transforms) == D
+
+    def test_ga2m_with_transforms(self, synthetic_tensors):
+        X, y = synthetic_tensors
+        B, L, D = X.shape
+        model = GA2M_Paper(
+            num_features=D, interaction_pairs=[(0, 1)],
+            hidden_dims=[8, 4], feature_transforms=True,
+        )
+        out = model(X)
+        assert out.shape == (B, L)
+
+    def test_gam_residual_and_transforms(self, synthetic_tensors):
+        X, y = synthetic_tensors
+        B, L, D = X.shape
+        model = GAM_Paper(
+            num_features=D, hidden_dims=[8, 4],
+            residual=True, feature_transforms=True,
+        )
+        out = model(X)
+        assert out.shape == (B, L)
+
+    def test_get_main_effect_with_transforms(self, synthetic_data):
+        X, y = synthetic_data
+        D = X.shape[-1]
+        model = GAM_Paper(num_features=D, hidden_dims=[8, 4], feature_transforms=True)
+        model.init_transforms_from_data(X)
+        x_vals = np.linspace(-1, 1, 20).astype(np.float32)
+        eff = model.get_main_effect(0, x_vals)
+        assert eff.shape == (20,)
+
+    def test_no_transforms_by_default(self, synthetic_tensors):
+        X, y = synthetic_tensors
+        model = GAM_Paper(num_features=X.shape[-1], hidden_dims=[8, 4])
+        assert model.feature_transforms is None
+
+
 class TestMultiObjectiveRankingGAM:
     def _make_model(self):
         objectives = [

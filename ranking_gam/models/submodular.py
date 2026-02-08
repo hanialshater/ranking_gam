@@ -22,7 +22,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .towers import PaperTower, ConcavePWL
+from .towers import PaperTower, ConcavePWL, LearnableMonotoneTransform
 from .groupwise import GroupwiseFeatureComputer
 
 
@@ -37,6 +37,10 @@ class SubmodularRankingGAM(nn.Module):
         dropout=0.0,
         train_mode="pointwise",
         gumbel_tau=1.0,
+        residual=False,
+        input_norm=False,
+        feature_transforms=False,
+        num_transform_knots=20,
     ):
         """
         Args:
@@ -47,6 +51,10 @@ class SubmodularRankingGAM(nn.Module):
             dropout: dropout rate for item towers
             train_mode: 'pointwise' or 'soft_greedy'
             gumbel_tau: temperature for Gumbel-softmax (soft_greedy mode)
+            residual: add skip connections to item towers
+            input_norm: apply BatchNorm to item tower inputs
+            feature_transforms: use learnable monotone feature transforms
+            num_transform_knots: knots per feature transform
         """
         super().__init__()
         if item_hidden is None:
@@ -60,10 +68,18 @@ class SubmodularRankingGAM(nn.Module):
 
         self.item_towers = nn.ModuleList(
             [
-                PaperTower(1, hidden_dims=item_hidden, dropout=dropout)
+                PaperTower(1, hidden_dims=item_hidden, dropout=dropout,
+                           residual=residual, input_norm=input_norm)
                 for _ in range(num_item_features)
             ]
         )
+
+        self.feature_transforms = None
+        if feature_transforms:
+            self.feature_transforms = nn.ModuleList(
+                [LearnableMonotoneTransform(num_knots=num_transform_knots)
+                 for _ in range(num_item_features)]
+            )
 
         self.diversity_towers = nn.ModuleList(
             [
@@ -78,6 +94,17 @@ class SubmodularRankingGAM(nn.Module):
 
         self.feature_computer = GroupwiseFeatureComputer(groupwise_specs)
 
+    def init_transforms_from_data(self, X):
+        """Initialize feature transforms from training data percentiles.
+
+        Args:
+            X: [B, L, D] numpy array of training features (item features only).
+        """
+        if self.feature_transforms is None:
+            return
+        for j, transform in enumerate(self.feature_transforms):
+            transform.init_from_data(X[:, :, j])
+
     def base_scores(self, x):
         """Compute base GAM scores (item-level, set-independent).
 
@@ -91,7 +118,10 @@ class SubmodularRankingGAM(nn.Module):
 
         sub_scores = []
         for j in range(self.num_item_features):
-            sub_scores.append(self.item_towers[j](x_flat[:, j : j + 1]))
+            feat = x_flat[:, j : j + 1]
+            if self.feature_transforms is not None:
+                feat = self.feature_transforms[j](feat)
+            sub_scores.append(self.item_towers[j](feat))
 
         total = torch.stack(sub_scores, dim=-1).sum(dim=-1).squeeze(-1)
         return total.view(B, L)
