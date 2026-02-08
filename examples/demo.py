@@ -362,32 +362,16 @@ def demo_multi_objective(data, epochs, K, queries_per_epoch):
 
 def demo_gbdt(data, epochs, K, transforms=True, residual=True, cosine=True,
               l1_reg=0.001, label_smoothing=0.1, weight_decay=0.01):
-    """Demo 4: GBDT baseline + residual-boosted GAM."""
+    """Demo 4: GAM -> GBDT on residuals -> magic curve tower."""
     print("\n" + "=" * 70)
-    print("Demo 4: GBDT Baseline + Residual-Boosted GAM")
+    print("Demo 4: GAM + GBDT Magic Curve (Residual Boosting)")
     print("=" * 70)
+    print("  Pipeline: GAM first -> GBDT on residuals -> add magic curve tower")
 
     from ranking_gam.training.boosting import (
         train_gbdt_baseline,
-        train_gbdt_residual_boost,
+        compute_gbdt_residual_feature,
     )
-
-    # GBDT baseline (LambdaMART)
-    print("\n  Training LambdaMART baseline...")
-    gbdt_model, gbdt_ndcg = train_gbdt_baseline(
-        data["train_X"], data["train_y"],
-        data["eval_X"], data["eval_y"],
-        k=K, n_estimators=300,
-    )
-
-    # GAM baseline
-    print("\n  Training GAM baseline...")
-    gam = rg.GAM_Paper(
-        num_features=136, hidden_dims=[16, 8],
-        feature_transforms=transforms, residual=residual,
-    )
-    if transforms:
-        gam.init_transforms_from_data(data["train_X"])
 
     def make_loaders(X, y):
         ds = TensorDataset(torch.from_numpy(X), torch.from_numpy(y))
@@ -395,6 +379,23 @@ def demo_gbdt(data, epochs, K, transforms=True, residual=True, cosine=True,
         eval_ds = TensorDataset(torch.from_numpy(data["eval_X"]), torch.from_numpy(data["eval_y"]))
         eval_l = DataLoader(eval_ds, batch_size=32)
         return train_l, eval_l
+
+    # --- Also train a standalone GBDT for comparison ---
+    print("\n  [Baseline] Training standalone GBDT (LambdaMART)...")
+    gbdt_standalone, gbdt_standalone_ndcg = train_gbdt_baseline(
+        data["train_X"], data["train_y"],
+        data["eval_X"], data["eval_y"],
+        k=K, n_estimators=300,
+    )
+
+    # --- Stage 1: Train GAM on raw features (interpretable signal) ---
+    print("\n  [Stage 1] Training GAM on raw features...")
+    gam = rg.GAM_Paper(
+        num_features=136, hidden_dims=[16, 8],
+        feature_transforms=transforms, residual=residual,
+    )
+    if transforms:
+        gam.init_transforms_from_data(data["train_X"])
 
     train_loader, eval_loader = make_loaders(data["train_X"], data["train_y"])
     gam_ndcg = rg.train_model(
@@ -404,21 +405,67 @@ def demo_gbdt(data, epochs, K, transforms=True, residual=True, cosine=True,
         lr_schedule="cosine" if cosine else "constant",
         l1_output_reg=l1_reg, weight_decay=weight_decay,
     )
-    print(f"\n  GAM: NDCG@{K} = {gam_ndcg:.4f}")
+    print(f"  Stage 1 GAM: NDCG@{K} = {gam_ndcg:.4f}")
 
-    # Residual-boosted GAM
-    print("\n  Training residual-boosted GAM (GAM + GBDT tower)...")
-    from ranking_gam.training.boosting import compute_gbdt_residual_feature
+    # --- Stage 2: Compute residuals, train GBDT on what GAM missed ---
+    print("\n  [Stage 2] Training GBDT on GAM residuals...")
+    from ranking_gam.training.boosting import _gam_predict, _train_gbdt_on_targets
 
-    train_X_boosted = compute_gbdt_residual_feature(gbdt_model, data["train_X"])
-    eval_X_boosted = compute_gbdt_residual_feature(gbdt_model, data["eval_X"])
+    gam_scores_train = _gam_predict(gam, data["train_X"], device)
+    gam_scores_eval = _gam_predict(gam, data["eval_X"], device)
+
+    def _make_residual_labels(y_true, gam_scores):
+        valid = y_true >= 0
+        residuals = np.full_like(y_true, -1, dtype=np.float32)
+        if valid.any():
+            gs = gam_scores.copy()
+            g_mean, g_std = gs[valid].mean(), max(gs[valid].std(), 1e-6)
+            y_mean, y_std = y_true[valid].astype(np.float32).mean(), max(y_true[valid].astype(np.float32).std(), 1e-6)
+            gs_norm = (gs - g_mean) / g_std * y_std + y_mean
+            res = y_true.astype(np.float32) - gs_norm
+            res_valid = res[valid]
+            res_valid = res_valid - res_valid.min()  # shift to non-negative
+            residuals[valid] = res_valid
+        return residuals
+
+    train_residuals = _make_residual_labels(data["train_y"], gam_scores_train)
+    eval_residuals = _make_residual_labels(data["eval_y"], gam_scores_eval)
+
+    gbdt_residual = _train_gbdt_on_targets(
+        data["train_X"], train_residuals,
+        data["eval_X"], eval_residuals,
+        k=K, n_estimators=300,
+    )
+
+    # --- Stage 3: Add magic curve tower (freeze D towers, train tower D+1) ---
+    print("\n  [Stage 3] Training magic curve tower (D original towers frozen)...")
+    train_X_boosted = compute_gbdt_residual_feature(gbdt_residual, data["train_X"])
+    eval_X_boosted = compute_gbdt_residual_feature(gbdt_residual, data["eval_X"])
 
     boosted_gam = rg.GAM_Paper(
         num_features=137, hidden_dims=[16, 8],
         feature_transforms=transforms, residual=residual,
     )
-    if transforms:
-        boosted_gam.init_transforms_from_data(train_X_boosted)
+
+    # Copy trained weights from Stage 1 into first 136 towers
+    with torch.no_grad():
+        for j in range(136):
+            boosted_gam.towers[j].load_state_dict(gam.towers[j].state_dict())
+        if transforms:
+            for j in range(136):
+                boosted_gam.feature_transforms[j].load_state_dict(
+                    gam.feature_transforms[j].state_dict()
+                )
+            # Init transform for magic curve from boosted data
+            boosted_gam.init_transforms_from_data(train_X_boosted)
+
+    # Freeze the 136 original towers and their transforms
+    for j in range(136):
+        for param in boosted_gam.towers[j].parameters():
+            param.requires_grad = False
+        if transforms:
+            for param in boosted_gam.feature_transforms[j].parameters():
+                param.requires_grad = False
 
     def make_loaders_boosted(X, y):
         ds = TensorDataset(torch.from_numpy(X), torch.from_numpy(y))
@@ -437,29 +484,31 @@ def demo_gbdt(data, epochs, K, transforms=True, residual=True, cosine=True,
     )
 
     print(f"\n  Summary:")
-    print(f"    GAM only:             NDCG@{K} = {gam_ndcg:.4f}")
-    print(f"    GBDT (LambdaMART):    NDCG@{K} = {gbdt_ndcg:.4f}")
-    print(f"    GAM + GBDT tower:     NDCG@{K} = {boosted_ndcg:.4f}")
+    print(f"    GAM only (136 towers):        NDCG@{K} = {gam_ndcg:.4f}")
+    print(f"    GAM + magic curve (137 towers):NDCG@{K} = {boosted_ndcg:.4f}")
+    print(f"    GBDT standalone (black box):   NDCG@{K} = {gbdt_standalone_ndcg:.4f}")
+    delta = boosted_ndcg - gam_ndcg
+    print(f"    Magic curve gain:              {delta:+.4f}")
 
-    # Plot response curve for the GBDT tower (feature 136)
+    # Plot response curve for the magic curve tower (feature 136)
     boosted_gam.eval()
     fig, ax = plt.subplots(1, 1, figsize=(6, 4))
     x_vals = np.linspace(0, 1, 100).astype(np.float32)
     effect = boosted_gam.get_main_effect(136, x_vals)
-    ax.plot(x_vals, effect, linewidth=2)
-    ax.set_xlabel("GBDT score (normalized)")
+    ax.plot(x_vals, effect, linewidth=2, color="#e74c3c")
+    ax.set_xlabel("GBDT residual score (normalized)")
     ax.set_ylabel("Tower output")
-    ax.set_title("GBDT Residual Tower: f_gbdt(score)")
+    ax.set_title("Magic Curve: f(GBDT_residual_score)")
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
-    fig.savefig("gbdt_tower_response.png", dpi=150, bbox_inches="tight")
+    fig.savefig("magic_curve_response.png", dpi=150, bbox_inches="tight")
     plt.close(fig)
-    print("  Saved: gbdt_tower_response.png")
+    print("  Saved: magic_curve_response.png")
 
     return {
         "GAM_only": gam_ndcg,
-        "GBDT_LambdaMART": gbdt_ndcg,
-        "GAM+GBDT_tower": boosted_ndcg,
+        "GAM+magic_curve": boosted_ndcg,
+        "GBDT_standalone": gbdt_standalone_ndcg,
     }
 
 

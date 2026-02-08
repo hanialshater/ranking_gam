@@ -88,9 +88,19 @@ class TestResidualBoost:
 
         assert "boosted_model" in result
         assert "gbdt_model" in result
-        assert "gbdt_ndcg" in result
+        assert "stage1_ndcg" in result
+        assert "gbdt_residual_ndcg" in result
         assert "boosted_ndcg" in result
         assert isinstance(result["boosted_ndcg"], float)
+        assert isinstance(result["stage1_ndcg"], float)
 
         # Boosted model should have D+1 features
         assert result["boosted_model"].num_features == D + 1
+
+        # First D towers should be frozen, only magic curve tower trainable
+        boosted = result["boosted_model"]
+        for j in range(D):
+            for param in boosted.towers[j].parameters():
+                assert not param.requires_grad, f"Tower {j} should be frozen"
+        for param in boosted.towers[D].parameters():
+            assert param.requires_grad, "Magic curve tower should be trainable"
