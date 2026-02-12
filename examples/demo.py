@@ -153,7 +153,8 @@ def _make_loss(loss_name, label_smoothing=0.0):
 def demo_gam(data, epochs, K, transforms=True, residual=True, lr_schedule="cosine",
              l1_reg=0.0001, label_smoothing=0.1, weight_decay=0.01,
              loss="listnet", tower_dropout=0.0, output_norm=False,
-             ga2m=False, ga2m_pairs=20, activation="relu", context=False):
+             ga2m=False, ga2m_pairs=20, activation="relu", context=False,
+             patience=10):
     """Demo 1: GAM / GA2M / ContextGAM -- Interpretable Ranking."""
     if context:
         model_name = "ContextGAM"
@@ -228,7 +229,7 @@ def demo_gam(data, epochs, K, transforms=True, residual=True, lr_schedule="cosin
     loss_fn = _make_loss(loss, label_smoothing)
     ndcg = rg.train_model(
         model, data["train_loader"], data["eval_loader"], loss_fn,
-        epochs=epochs, patience=10, device=device,
+        epochs=epochs, patience=patience, device=device,
         lr_schedule=lr_schedule,
         l1_output_reg=l1_reg, weight_decay=weight_decay,
     )
@@ -246,7 +247,8 @@ def demo_gam(data, epochs, K, transforms=True, residual=True, lr_schedule="cosin
 
 def demo_submodular(data, epochs, K, queries_per_epoch,
                     transforms=True, residual=True, lr_schedule="cosine",
-                    l1_reg=0.0001, label_smoothing=0.1, weight_decay=0.01):
+                    l1_reg=0.0001, label_smoothing=0.1, weight_decay=0.01,
+                    patience=10):
     """Demo 2: SubmodularRankingGAM -- Diversity with Greedy Guarantees."""
     print("\n" + "=" * 70)
     print("Demo 2: SubmodularRankingGAM -- Diversity with Greedy Guarantees")
@@ -270,7 +272,7 @@ def demo_submodular(data, epochs, K, queries_per_epoch,
     submod_ndcg = rg.train_model(
         submod, data["train_loader"], data["eval_loader"],
         rg.ListNetLoss(label_smoothing=label_smoothing),
-        epochs=epochs, patience=10, device=device,
+        epochs=epochs, patience=patience, device=device,
         lr_schedule=lr_schedule,
         l1_output_reg=l1_reg, weight_decay=weight_decay,
     )
@@ -322,7 +324,8 @@ def demo_submodular(data, epochs, K, queries_per_epoch,
 
 def demo_multi_objective(data, epochs, K, queries_per_epoch,
                          transforms=True, residual=True, lr_schedule="cosine",
-                         l1_reg=0.0001, label_smoothing=0.1, weight_decay=0.01):
+                         l1_reg=0.0001, label_smoothing=0.1, weight_decay=0.01,
+                         patience=10):
     """Demo 3: Multi-Objective Ranking GAM."""
     print("\n" + "=" * 70)
     print("Demo 3: Multi-Objective Ranking GAM")
@@ -429,7 +432,8 @@ def demo_multi_objective(data, epochs, K, queries_per_epoch,
 
 
 def demo_gbdt(data, epochs, K, transforms=True, residual=True, lr_schedule="cosine",
-              l1_reg=0.0001, label_smoothing=0.1, weight_decay=0.01):
+              l1_reg=0.0001, label_smoothing=0.1, weight_decay=0.01,
+              patience=10):
     """Demo 4: GAM -> GBDT on residuals -> magic curve tower."""
     print("\n" + "=" * 70)
     print("Demo 4: GAM + GBDT Magic Curve (Residual Boosting)")
@@ -461,7 +465,7 @@ def demo_gbdt(data, epochs, K, transforms=True, residual=True, lr_schedule="cosi
     gam_ndcg = rg.train_model(
         gam, train_loader, eval_loader,
         rg.ListNetLoss(label_smoothing=label_smoothing),
-        epochs=epochs, patience=10, device=device,
+        epochs=epochs, patience=patience, device=device,
         lr_schedule=lr_schedule,
         l1_output_reg=l1_reg, weight_decay=weight_decay,
     )
@@ -535,7 +539,7 @@ def demo_gbdt(data, epochs, K, transforms=True, residual=True, lr_schedule="cosi
     boosted_ndcg = rg.train_model(
         boosted_gam, train_loader_b, eval_loader_b,
         rg.ListNetLoss(label_smoothing=label_smoothing),
-        epochs=epochs, patience=10, device=device,
+        epochs=epochs, patience=patience, device=device,
         lr_schedule=lr_schedule,
         l1_output_reg=l1_reg, weight_decay=weight_decay,
     )
@@ -611,6 +615,8 @@ Examples:
         help="comma-separated demos to run: gam,submodular,multi,all (default: all)",
     )
     parser.add_argument("--epochs", type=int, default=30)
+    parser.add_argument("--patience", type=int, default=10,
+                        help="early stopping patience (default: 10)")
     parser.add_argument("--k", type=int, default=10)
     parser.add_argument("--queries-per-epoch", type=int, default=400)
     # Enhancements ON by default -- use --no-* to disable
@@ -710,6 +716,7 @@ Examples:
         transforms=use_transforms, residual=use_residual,
         lr_schedule=lr_schedule, l1_reg=args.l1_reg,
         label_smoothing=args.label_smoothing, weight_decay=args.weight_decay,
+        patience=args.patience,
     )
     # Extra kwargs only for GAM/GA2M demo
     gam_kw = dict(
