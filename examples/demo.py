@@ -9,13 +9,14 @@ Usage:
     python examples/demo.py --demo submodular  # only SubmodularRankingGAM
     python examples/demo.py --demo multi       # only MultiObjectiveRankingGAM
     python examples/demo.py --demo gbdt        # GBDT baseline + boosted GAM
-    python examples/demo.py --epochs 30        # production quality
 
 All enhancements are ON by default. Use --no-* flags to disable:
     python examples/demo.py --demo gam --no-transforms          # disable feature transforms
     python examples/demo.py --demo gam --no-residual            # disable residual skip
     python examples/demo.py --demo gam --no-cosine              # disable cosine LR
     python examples/demo.py --demo gam --l1-reg 0               # disable L1 reg
+    python examples/demo.py --demo gam --loss pairwise          # pairwise loss (stable gradients)
+    python examples/demo.py --demo gam --lr-schedule plateau    # adaptive LR reduction
     python examples/demo.py --demo gam --no-transforms --no-residual --no-cosine --l1-reg 0  # bare GAM
 """
 
@@ -136,6 +137,8 @@ def _make_loss(loss_name, label_smoothing=0.0):
     """Create loss function by name."""
     if loss_name == "listnet":
         return rg.ListNetLoss(label_smoothing=label_smoothing)
+    elif loss_name == "pairwise":
+        return rg.PairwiseLoss(sigma=1.0)
     elif loss_name == "approxndcg":
         return rg.ApproxNDCGLoss(alpha=10)
     elif loss_name == "ndcg2pp":
@@ -143,10 +146,10 @@ def _make_loss(loss_name, label_smoothing=0.0):
     elif loss_name == "listmle":
         return rg.ListMLELoss()
     else:
-        raise ValueError(f"Unknown loss: {loss_name}. Choose from: listnet, approxndcg, ndcg2pp, listmle")
+        raise ValueError(f"Unknown loss: {loss_name}. Choose from: listnet, pairwise, approxndcg, ndcg2pp, listmle")
 
 
-def demo_gam(data, epochs, K, transforms=True, residual=True, cosine=True,
+def demo_gam(data, epochs, K, transforms=True, residual=True, lr_schedule="cosine",
              l1_reg=0.0001, label_smoothing=0.1, weight_decay=0.01,
              loss="listnet", tower_dropout=0.0, output_norm=False,
              ga2m=False, ga2m_pairs=20, activation="relu"):
@@ -161,8 +164,8 @@ def demo_gam(data, epochs, K, transforms=True, residual=True, cosine=True,
         extras.append("transforms")
     if residual:
         extras.append("residual")
-    if cosine:
-        extras.append("cosine_lr")
+    if lr_schedule != "constant":
+        extras.append(f"lr={lr_schedule}")
     if l1_reg > 0:
         extras.append(f"l1={l1_reg}")
     if label_smoothing > 0:
@@ -209,8 +212,8 @@ def demo_gam(data, epochs, K, transforms=True, residual=True, cosine=True,
     loss_fn = _make_loss(loss, label_smoothing)
     ndcg = rg.train_model(
         model, data["train_loader"], data["eval_loader"], loss_fn,
-        epochs=epochs, patience=7, device=device,
-        lr_schedule="cosine" if cosine else "constant",
+        epochs=epochs, patience=10, device=device,
+        lr_schedule=lr_schedule,
         l1_output_reg=l1_reg, weight_decay=weight_decay,
     )
     print(f"\n{model_name} ({loss}): NDCG@{K} = {ndcg:.4f}")
@@ -226,7 +229,7 @@ def demo_gam(data, epochs, K, transforms=True, residual=True, cosine=True,
 
 
 def demo_submodular(data, epochs, K, queries_per_epoch,
-                    transforms=True, residual=True, cosine=True,
+                    transforms=True, residual=True, lr_schedule="cosine",
                     l1_reg=0.0001, label_smoothing=0.1, weight_decay=0.01):
     """Demo 2: SubmodularRankingGAM -- Diversity with Greedy Guarantees."""
     print("\n" + "=" * 70)
@@ -251,8 +254,8 @@ def demo_submodular(data, epochs, K, queries_per_epoch,
     submod_ndcg = rg.train_model(
         submod, data["train_loader"], data["eval_loader"],
         rg.ListNetLoss(label_smoothing=label_smoothing),
-        epochs=epochs, patience=7, device=device,
-        lr_schedule="cosine" if cosine else "constant",
+        epochs=epochs, patience=10, device=device,
+        lr_schedule=lr_schedule,
         l1_output_reg=l1_reg, weight_decay=weight_decay,
     )
 
@@ -260,7 +263,7 @@ def demo_submodular(data, epochs, K, queries_per_epoch,
     submod = rg.train_diversity_towers(
         submod, data["train_X_aug"], data["train_y"],
         epochs=epochs, lr=0.003, k=K, queries_per_epoch=queries_per_epoch,
-        lr_schedule="cosine" if cosine else "constant",
+        lr_schedule=lr_schedule,
         weight_decay=weight_decay,
     )
 
@@ -302,7 +305,7 @@ def demo_submodular(data, epochs, K, queries_per_epoch,
 
 
 def demo_multi_objective(data, epochs, K, queries_per_epoch,
-                         transforms=True, residual=True, cosine=True,
+                         transforms=True, residual=True, lr_schedule="cosine",
                          l1_reg=0.0001, label_smoothing=0.1, weight_decay=0.01):
     """Demo 3: Multi-Objective Ranking GAM."""
     print("\n" + "=" * 70)
@@ -369,7 +372,7 @@ def demo_multi_objective(data, epochs, K, queries_per_epoch,
     rg.train_multi_objective(
         mo_model, data["train_X_aug"], data["train_y"],
         epochs=epochs, lr=0.003, k=K, queries_per_epoch=queries_per_epoch,
-        lr_schedule="cosine" if cosine else "constant",
+        lr_schedule=lr_schedule,
         weight_decay=weight_decay,
     )
 
@@ -409,7 +412,7 @@ def demo_multi_objective(data, epochs, K, queries_per_epoch,
     return {}
 
 
-def demo_gbdt(data, epochs, K, transforms=True, residual=True, cosine=True,
+def demo_gbdt(data, epochs, K, transforms=True, residual=True, lr_schedule="cosine",
               l1_reg=0.0001, label_smoothing=0.1, weight_decay=0.01):
     """Demo 4: GAM -> GBDT on residuals -> magic curve tower."""
     print("\n" + "=" * 70)
@@ -442,8 +445,8 @@ def demo_gbdt(data, epochs, K, transforms=True, residual=True, cosine=True,
     gam_ndcg = rg.train_model(
         gam, train_loader, eval_loader,
         rg.ListNetLoss(label_smoothing=label_smoothing),
-        epochs=epochs, patience=7, device=device,
-        lr_schedule="cosine" if cosine else "constant",
+        epochs=epochs, patience=10, device=device,
+        lr_schedule=lr_schedule,
         l1_output_reg=l1_reg, weight_decay=weight_decay,
     )
     print(f"  Stage 1 GAM: NDCG@{K} = {gam_ndcg:.4f}")
@@ -516,8 +519,8 @@ def demo_gbdt(data, epochs, K, transforms=True, residual=True, cosine=True,
     boosted_ndcg = rg.train_model(
         boosted_gam, train_loader_b, eval_loader_b,
         rg.ListNetLoss(label_smoothing=label_smoothing),
-        epochs=epochs, patience=7, device=device,
-        lr_schedule="cosine" if cosine else "constant",
+        epochs=epochs, patience=10, device=device,
+        lr_schedule=lr_schedule,
         l1_output_reg=l1_reg, weight_decay=weight_decay,
     )
 
@@ -590,7 +593,7 @@ Examples:
         default="all",
         help="comma-separated demos to run: gam,submodular,multi,all (default: all)",
     )
-    parser.add_argument("--epochs", type=int, default=10)
+    parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--k", type=int, default=10)
     parser.add_argument("--queries-per-epoch", type=int, default=400)
     # Enhancements ON by default -- use --no-* to disable
@@ -600,6 +603,9 @@ Examples:
                         help="disable residual skip connections")
     parser.add_argument("--no-cosine", action="store_true",
                         help="disable cosine annealing LR schedule")
+    parser.add_argument("--lr-schedule", type=str, default=None,
+                        choices=["constant", "cosine", "plateau"],
+                        help="LR schedule (default: cosine unless --no-cosine)")
     parser.add_argument("--l1-reg", type=float, default=0.0001,
                         help="L1 output regularization weight (default: 0.0001, 0 to disable)")
     parser.add_argument("--label-smoothing", type=float, default=0.1,
@@ -608,7 +614,7 @@ Examples:
                         help="AdamW weight decay (default: 0.01, 0 to disable)")
     # New improvement flags (off by default for comparison)
     parser.add_argument("--loss", type=str, default="listnet",
-                        choices=["listnet", "approxndcg", "ndcg2pp", "listmle"],
+                        choices=["listnet", "pairwise", "approxndcg", "ndcg2pp", "listmle"],
                         help="ranking loss function (default: listnet)")
     parser.add_argument("--tower-dropout", type=float, default=0.0,
                         help="tower output dropout rate (default: 0, e.g. 0.1)")
@@ -633,7 +639,13 @@ Examples:
     # Resolve flags: --no-* overrides defaults
     use_transforms = not args.no_transforms
     use_residual = not args.no_residual
-    use_cosine = not args.no_cosine
+    # --lr-schedule takes precedence over --no-cosine
+    if args.lr_schedule is not None:
+        lr_schedule = args.lr_schedule
+    elif args.no_cosine:
+        lr_schedule = "constant"
+    else:
+        lr_schedule = "cosine"
 
     # Parse demo selection
     if args.demo == "all":
@@ -652,7 +664,7 @@ Examples:
     config_parts = [f"epochs={EPOCHS}", f"k={K}", f"loss={args.loss}"]
     config_parts.append(f"transforms={'ON' if use_transforms else 'OFF'}")
     config_parts.append(f"residual={'ON' if use_residual else 'OFF'}")
-    config_parts.append(f"cosine_lr={'ON' if use_cosine else 'OFF'}")
+    config_parts.append(f"lr_schedule={lr_schedule}")
     if args.l1_reg > 0:
         config_parts.append(f"l1={args.l1_reg}")
     if args.label_smoothing > 0:
@@ -675,7 +687,7 @@ Examples:
     # Base training kwargs shared by all demos
     base_kw = dict(
         transforms=use_transforms, residual=use_residual,
-        cosine=use_cosine, l1_reg=args.l1_reg,
+        lr_schedule=lr_schedule, l1_reg=args.l1_reg,
         label_smoothing=args.label_smoothing, weight_decay=args.weight_decay,
     )
     # Extra kwargs only for GAM/GA2M demo

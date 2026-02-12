@@ -77,10 +77,17 @@ def train_model(
     optimizer = OptimClass(param_groups)
 
     scheduler = None
+    plateau_scheduler = False
     if lr_schedule == "cosine":
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer, T_max=epochs, eta_min=lr * 0.01,
         )
+    elif lr_schedule == "plateau":
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode="max", factor=0.5, patience=max(patience // 2, 2),
+            min_lr=lr * 0.001,
+        )
+        plateau_scheduler = True
 
     best_ndcg = 0
     best_state = None
@@ -112,12 +119,6 @@ def train_model(
 
         train_loss /= len(train_loader)
 
-        # Step schedulers: warmup first, then cosine
-        if warmup_scheduler is not None and epoch < warmup_epochs:
-            warmup_scheduler.step()
-        elif scheduler is not None:
-            scheduler.step()
-
         model.eval()
         val_ndcg = []
         with torch.no_grad():
@@ -127,7 +128,18 @@ def train_model(
                 val_ndcg.append(compute_ndcg(pred, y, k=eval_k))
 
         val_ndcg = np.mean(val_ndcg)
-        print(f"Epoch {epoch + 1:2d}: loss={train_loss:.4f}, val_ndcg@{eval_k}={val_ndcg:.4f}")
+
+        # Step schedulers: warmup first, then main scheduler
+        if warmup_scheduler is not None and epoch < warmup_epochs:
+            warmup_scheduler.step()
+        elif scheduler is not None:
+            if plateau_scheduler:
+                scheduler.step(val_ndcg)
+            else:
+                scheduler.step()
+
+        cur_lr = optimizer.param_groups[0]["lr"]
+        print(f"Epoch {epoch + 1:2d}: loss={train_loss:.4f}, val_ndcg@{eval_k}={val_ndcg:.4f}, lr={cur_lr:.6f}")
 
         if val_ndcg > best_ndcg:
             best_ndcg = val_ndcg
