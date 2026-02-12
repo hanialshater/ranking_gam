@@ -41,6 +41,7 @@ class SubmodularRankingGAM(nn.Module):
         input_norm=False,
         feature_transforms=False,
         num_transform_knots=20,
+        activation="relu",
     ):
         """
         Args:
@@ -69,7 +70,7 @@ class SubmodularRankingGAM(nn.Module):
         self.item_towers = nn.ModuleList(
             [
                 PaperTower(1, hidden_dims=item_hidden, dropout=dropout,
-                           residual=residual, input_norm=input_norm)
+                           residual=residual, input_norm=input_norm, activation=activation)
                 for _ in range(num_item_features)
             ]
         )

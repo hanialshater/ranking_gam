@@ -36,6 +36,7 @@ class GA2M_Paper(nn.Module):
         num_transform_knots=20,
         tower_dropout=0.0,
         output_norm=False,
+        activation="relu",
     ):
         super().__init__()
         if hidden_dims is None:
@@ -50,12 +51,13 @@ class GA2M_Paper(nn.Module):
         self.output_norm = output_norm
 
         self.main_towers = nn.ModuleList(
-            [PaperTower(1, hidden_dims, dropout, residual, input_norm) for _ in range(num_features)]
+            [PaperTower(1, hidden_dims, dropout, residual, input_norm, activation=activation)
+             for _ in range(num_features)]
         )
 
         self.interaction_towers = nn.ModuleList(
             [
-                PaperTower(2, interaction_hidden, dropout, residual, input_norm)
+                PaperTower(2, interaction_hidden, dropout, residual, input_norm, activation=activation)
                 for _ in range(self.num_interactions)
             ]
         )
@@ -172,6 +174,7 @@ class GAM_Paper(nn.Module):
         num_transform_knots=20,
         tower_dropout=0.0,
         output_norm=False,
+        activation="relu",
     ):
         super().__init__()
         if hidden_dims is None:
@@ -181,7 +184,8 @@ class GAM_Paper(nn.Module):
         self.output_norm = output_norm
 
         self.towers = nn.ModuleList(
-            [PaperTower(1, hidden_dims, dropout, residual, input_norm) for _ in range(num_features)]
+            [PaperTower(1, hidden_dims, dropout, residual, input_norm, activation=activation)
+             for _ in range(num_features)]
         )
 
         self.feature_transforms = None

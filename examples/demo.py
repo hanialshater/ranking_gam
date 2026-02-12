@@ -147,9 +147,9 @@ def _make_loss(loss_name, label_smoothing=0.0):
 
 
 def demo_gam(data, epochs, K, transforms=True, residual=True, cosine=True,
-             l1_reg=0.001, label_smoothing=0.1, weight_decay=0.01,
+             l1_reg=0.0001, label_smoothing=0.1, weight_decay=0.01,
              loss="listnet", tower_dropout=0.0, output_norm=False,
-             ga2m=False, ga2m_pairs=20):
+             ga2m=False, ga2m_pairs=20, activation="relu"):
     """Demo 1: GAM / GA2M -- Interpretable Ranking."""
     model_name = "GA2M" if ga2m else "GAM"
     print("\n" + "=" * 70)
@@ -175,6 +175,8 @@ def demo_gam(data, epochs, K, transforms=True, residual=True, cosine=True,
         extras.append("output_norm")
     if ga2m:
         extras.append(f"ga2m(top_{ga2m_pairs}_pairs)")
+    if activation != "relu":
+        extras.append(f"activation={activation}")
     extras.append(f"loss={loss}")
     print(f"  Enhancements: {', '.join(extras)}")
 
@@ -191,12 +193,14 @@ def demo_gam(data, epochs, K, transforms=True, residual=True, cosine=True,
             interaction_pairs=interaction_pairs,
             feature_transforms=transforms, residual=residual,
             tower_dropout=tower_dropout, output_norm=output_norm,
+            activation=activation,
         )
     else:
         model = rg.GAM_Paper(
             num_features=136, hidden_dims=[16, 8],
             feature_transforms=transforms, residual=residual,
             tower_dropout=tower_dropout, output_norm=output_norm,
+            activation=activation,
         )
     if transforms:
         model.init_transforms_from_data(data["train_X"])
@@ -223,7 +227,7 @@ def demo_gam(data, epochs, K, transforms=True, residual=True, cosine=True,
 
 def demo_submodular(data, epochs, K, queries_per_epoch,
                     transforms=True, residual=True, cosine=True,
-                    l1_reg=0.001, label_smoothing=0.1, weight_decay=0.01):
+                    l1_reg=0.0001, label_smoothing=0.1, weight_decay=0.01):
     """Demo 2: SubmodularRankingGAM -- Diversity with Greedy Guarantees."""
     print("\n" + "=" * 70)
     print("Demo 2: SubmodularRankingGAM -- Diversity with Greedy Guarantees")
@@ -299,7 +303,7 @@ def demo_submodular(data, epochs, K, queries_per_epoch,
 
 def demo_multi_objective(data, epochs, K, queries_per_epoch,
                          transforms=True, residual=True, cosine=True,
-                         l1_reg=0.001, label_smoothing=0.1, weight_decay=0.01):
+                         l1_reg=0.0001, label_smoothing=0.1, weight_decay=0.01):
     """Demo 3: Multi-Objective Ranking GAM."""
     print("\n" + "=" * 70)
     print("Demo 3: Multi-Objective Ranking GAM")
@@ -406,7 +410,7 @@ def demo_multi_objective(data, epochs, K, queries_per_epoch,
 
 
 def demo_gbdt(data, epochs, K, transforms=True, residual=True, cosine=True,
-              l1_reg=0.001, label_smoothing=0.1, weight_decay=0.01):
+              l1_reg=0.0001, label_smoothing=0.1, weight_decay=0.01):
     """Demo 4: GAM -> GBDT on residuals -> magic curve tower."""
     print("\n" + "=" * 70)
     print("Demo 4: GAM + GBDT Magic Curve (Residual Boosting)")
@@ -596,8 +600,8 @@ Examples:
                         help="disable residual skip connections")
     parser.add_argument("--no-cosine", action="store_true",
                         help="disable cosine annealing LR schedule")
-    parser.add_argument("--l1-reg", type=float, default=0.001,
-                        help="L1 output regularization weight (default: 0.001, 0 to disable)")
+    parser.add_argument("--l1-reg", type=float, default=0.0001,
+                        help="L1 output regularization weight (default: 0.0001, 0 to disable)")
     parser.add_argument("--label-smoothing", type=float, default=0.1,
                         help="label smoothing for ListNet (default: 0.1, 0 to disable)")
     parser.add_argument("--weight-decay", type=float, default=0.01,
@@ -614,6 +618,9 @@ Examples:
                         help="use GA2M with pairwise interactions instead of GAM")
     parser.add_argument("--ga2m-pairs", type=int, default=20,
                         help="number of interaction pairs for GA2M (default: 20)")
+    parser.add_argument("--activation", type=str, default="relu",
+                        choices=["relu", "silu", "gelu"],
+                        help="tower activation function (default: relu, try silu for smoother curves)")
     # Backward compat: keep --transforms etc. as no-ops (already default)
     parser.add_argument("--transforms", action="store_true", default=True,
                         help=argparse.SUPPRESS)
@@ -658,6 +665,8 @@ Examples:
         config_parts.append("output_norm")
     if args.ga2m:
         config_parts.append(f"ga2m(pairs={args.ga2m_pairs})")
+    if args.activation != "relu":
+        config_parts.append(f"activation={args.activation}")
     print(f"Config: {', '.join(config_parts)}\n")
 
     data = load_data()
@@ -674,7 +683,7 @@ Examples:
         **base_kw,
         loss=args.loss, tower_dropout=args.tower_dropout,
         output_norm=args.output_norm, ga2m=args.ga2m,
-        ga2m_pairs=args.ga2m_pairs,
+        ga2m_pairs=args.ga2m_pairs, activation=args.activation,
     )
 
     if "gam" in demos:

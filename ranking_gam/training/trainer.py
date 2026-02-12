@@ -50,21 +50,31 @@ def train_model(
 
     model = model.to(device)
 
-    # Separate param groups: transforms get a lower LR to fine-tune gently
+    # Separate param groups:
+    #   - transforms: lower LR to fine-tune gently
+    #   - skip/bias params: no weight decay (prevents regularization from
+    #     making skip connections dominate and produce linear response curves)
+    #   - other params: full LR and weight decay
     transform_params = []
-    other_params = []
+    no_decay_params = []
+    decay_params = []
     for name, param in model.named_parameters():
         if "feature_transform" in name:
             transform_params.append(param)
+        elif "skip" in name or "bias" in name or "global_bias" in name:
+            no_decay_params.append(param)
         else:
-            other_params.append(param)
+            decay_params.append(param)
 
-    param_groups = [{"params": other_params, "lr": lr}]
+    param_groups = [
+        {"params": decay_params, "lr": lr, "weight_decay": weight_decay},
+        {"params": no_decay_params, "lr": lr, "weight_decay": 0.0},
+    ]
     if transform_params:
-        param_groups.append({"params": transform_params, "lr": lr * transform_lr_mult})
+        param_groups.append({"params": transform_params, "lr": lr * transform_lr_mult, "weight_decay": 0.0})
 
     OptimClass = torch.optim.AdamW if weight_decay > 0 else torch.optim.Adam
-    optimizer = OptimClass(param_groups, weight_decay=weight_decay)
+    optimizer = OptimClass(param_groups)
 
     scheduler = None
     if lr_schedule == "cosine":

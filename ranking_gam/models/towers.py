@@ -28,18 +28,21 @@ class PaperTower(nn.Module):
         input_norm: apply BatchNorm to the input before the MLP
     """
 
-    def __init__(self, in_dim, hidden_dims=None, dropout=0.0, residual=False, input_norm=False):
+    def __init__(self, in_dim, hidden_dims=None, dropout=0.0, residual=False, input_norm=False, activation="relu"):
         super().__init__()
         if hidden_dims is None:
             hidden_dims = [16, 8]
 
         self.norm = nn.BatchNorm1d(in_dim) if input_norm else None
 
+        act_map = {"relu": nn.ReLU, "silu": nn.SiLU, "gelu": nn.GELU}
+        act_cls = act_map.get(activation, nn.ReLU)
+
         layers = []
         prev_dim = in_dim
         for h in hidden_dims:
             layers.append(nn.Linear(prev_dim, h))
-            layers.append(nn.ReLU())
+            layers.append(act_cls())
             if dropout > 0:
                 layers.append(nn.Dropout(dropout))
             prev_dim = h
