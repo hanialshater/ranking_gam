@@ -248,7 +248,7 @@ def demo_gam(data, epochs, K, transforms=True, residual=True, lr_schedule="cosin
 def demo_submodular(data, epochs, K, queries_per_epoch,
                     transforms=True, residual=True, lr_schedule="cosine",
                     l1_reg=0.0001, label_smoothing=0.1, weight_decay=0.01,
-                    patience=10):
+                    patience=10, activation="relu", loss="listnet"):
     """Demo 2: SubmodularRankingGAM -- Diversity with Greedy Guarantees."""
     print("\n" + "=" * 70)
     print("Demo 2: SubmodularRankingGAM -- Diversity with Greedy Guarantees")
@@ -263,15 +263,17 @@ def demo_submodular(data, epochs, K, queries_per_epoch,
         train_mode="pointwise",
         feature_transforms=transforms,
         residual=residual,
+        activation=activation,
     )
     if transforms:
         submod.init_transforms_from_data(data["train_X"])
         print("  Initialized feature transforms from training data percentiles")
 
     # Phase 1: base towers
+    loss_fn = _make_loss(loss, label_smoothing)
     submod_ndcg = rg.train_model(
         submod, data["train_loader"], data["eval_loader"],
-        rg.ListNetLoss(label_smoothing=label_smoothing),
+        loss_fn,
         epochs=epochs, patience=patience, device=device,
         lr_schedule=lr_schedule,
         l1_output_reg=l1_reg, weight_decay=weight_decay,
@@ -433,7 +435,7 @@ def demo_multi_objective(data, epochs, K, queries_per_epoch,
 
 def demo_gbdt(data, epochs, K, transforms=True, residual=True, lr_schedule="cosine",
               l1_reg=0.0001, label_smoothing=0.1, weight_decay=0.01,
-              patience=10):
+              patience=10, activation="relu", loss="listnet"):
     """Demo 4: GAM -> GBDT on residuals -> magic curve tower."""
     print("\n" + "=" * 70)
     print("Demo 4: GAM + GBDT Magic Curve (Residual Boosting)")
@@ -457,14 +459,15 @@ def demo_gbdt(data, epochs, K, transforms=True, residual=True, lr_schedule="cosi
     gam = rg.GAM_Paper(
         num_features=136, hidden_dims=[16, 8],
         feature_transforms=transforms, residual=residual,
+        activation=activation,
     )
     if transforms:
         gam.init_transforms_from_data(data["train_X"])
 
+    loss_fn = _make_loss(loss, label_smoothing)
     train_loader, eval_loader = make_loaders(data["train_X"], data["train_y"])
     gam_ndcg = rg.train_model(
-        gam, train_loader, eval_loader,
-        rg.ListNetLoss(label_smoothing=label_smoothing),
+        gam, train_loader, eval_loader, loss_fn,
         epochs=epochs, patience=patience, device=device,
         lr_schedule=lr_schedule,
         l1_output_reg=l1_reg, weight_decay=weight_decay,
@@ -506,6 +509,7 @@ def demo_gbdt(data, epochs, K, transforms=True, residual=True, lr_schedule="cosi
     boosted_gam = rg.GAM_Paper(
         num_features=137, hidden_dims=[16, 8],
         feature_transforms=transforms, residual=residual,
+        activation=activation,
     )
 
     # Copy trained weights from Stage 1 into first 136 towers
@@ -538,7 +542,7 @@ def demo_gbdt(data, epochs, K, transforms=True, residual=True, lr_schedule="cosi
     train_loader_b, eval_loader_b = make_loaders_boosted(train_X_boosted, data["train_y"])
     boosted_ndcg = rg.train_model(
         boosted_gam, train_loader_b, eval_loader_b,
-        rg.ListNetLoss(label_smoothing=label_smoothing),
+        loss_fn,
         epochs=epochs, patience=patience, device=device,
         lr_schedule=lr_schedule,
         l1_output_reg=l1_reg, weight_decay=weight_decay,
@@ -731,13 +735,15 @@ Examples:
         results.update(demo_gam(data, EPOCHS, K, **gam_kw))
 
     if "submodular" in demos:
-        results.update(demo_submodular(data, EPOCHS, K, QPE, **base_kw))
+        results.update(demo_submodular(data, EPOCHS, K, QPE, **base_kw,
+                                       activation=args.activation, loss=args.loss))
 
     if "multi" in demos:
         results.update(demo_multi_objective(data, EPOCHS, K, QPE, **base_kw))
 
     if "gbdt" in demos:
-        results.update(demo_gbdt(data, EPOCHS, K, **base_kw))
+        results.update(demo_gbdt(data, EPOCHS, K, **base_kw,
+                                 activation=args.activation, loss=args.loss))
 
     # Summary
     if results:
