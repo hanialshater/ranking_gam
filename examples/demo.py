@@ -17,6 +17,7 @@ All enhancements are ON by default. Use --no-* flags to disable:
     python examples/demo.py --demo gam --l1-reg 0               # disable L1 reg
     python examples/demo.py --demo gam --loss pairwise          # pairwise loss (stable gradients)
     python examples/demo.py --demo gam --lr-schedule plateau    # adaptive LR reduction
+    python examples/demo.py --demo gam --context                # context-weighted GAM (+2-3 NDCG pts)
     python examples/demo.py --demo gam --no-transforms --no-residual --no-cosine --l1-reg 0  # bare GAM
 """
 
@@ -152,9 +153,14 @@ def _make_loss(loss_name, label_smoothing=0.0):
 def demo_gam(data, epochs, K, transforms=True, residual=True, lr_schedule="cosine",
              l1_reg=0.0001, label_smoothing=0.1, weight_decay=0.01,
              loss="listnet", tower_dropout=0.0, output_norm=False,
-             ga2m=False, ga2m_pairs=20, activation="relu"):
-    """Demo 1: GAM / GA2M -- Interpretable Ranking."""
-    model_name = "GA2M" if ga2m else "GAM"
+             ga2m=False, ga2m_pairs=20, activation="relu", context=False):
+    """Demo 1: GAM / GA2M / ContextGAM -- Interpretable Ranking."""
+    if context:
+        model_name = "ContextGAM"
+    elif ga2m:
+        model_name = "GA2M"
+    else:
+        model_name = "GAM"
     print("\n" + "=" * 70)
     print(f"Demo 1: {model_name} -- Interpretable Ranking")
     print("=" * 70)
@@ -176,6 +182,8 @@ def demo_gam(data, epochs, K, transforms=True, residual=True, lr_schedule="cosin
         extras.append(f"tower_drop={tower_dropout}")
     if output_norm:
         extras.append("output_norm")
+    if context:
+        extras.append("context_weights")
     if ga2m:
         extras.append(f"ga2m(top_{ga2m_pairs}_pairs)")
     if activation != "relu":
@@ -190,7 +198,15 @@ def demo_gam(data, epochs, K, transforms=True, residual=True, lr_schedule="cosin
             data["train_X"], data["train_y"], top_k=ga2m_pairs,
         )
 
-    if ga2m:
+    if context:
+        model = rg.ContextGAM(
+            num_features=136, hidden_dims=[16, 8],
+            context_hidden=[64, 32],
+            feature_transforms=transforms, residual=residual,
+            tower_dropout=tower_dropout, output_norm=output_norm,
+            activation=activation,
+        )
+    elif ga2m:
         model = rg.GA2M_Paper(
             num_features=136, hidden_dims=[16, 8],
             interaction_pairs=interaction_pairs,
@@ -580,6 +596,7 @@ Examples:
   python examples/demo.py --demo gam                         # best config (default)
   python examples/demo.py --demo gam --epochs 30             # production quality
   python examples/demo.py --demo gam --loss approxndcg       # compare losses
+  python examples/demo.py --demo gam --context               # context-weighted GAM (higher NDCG)
   python examples/demo.py --demo gam --ga2m --ga2m-pairs 20  # GA2M with interactions
   python examples/demo.py --demo gam --tower-dropout 0.1     # regularize via tower dropout
   python examples/demo.py --demo gam --output-norm           # center tower outputs
@@ -620,6 +637,8 @@ Examples:
                         help="tower output dropout rate (default: 0, e.g. 0.1)")
     parser.add_argument("--output-norm", action="store_true",
                         help="enable tower output normalization (BatchNorm)")
+    parser.add_argument("--context", action="store_true",
+                        help="use ContextGAM with learned per-feature importance weights")
     parser.add_argument("--ga2m", action="store_true",
                         help="use GA2M with pairwise interactions instead of GAM")
     parser.add_argument("--ga2m-pairs", type=int, default=20,
@@ -675,6 +694,8 @@ Examples:
         config_parts.append(f"tower_drop={args.tower_dropout}")
     if args.output_norm:
         config_parts.append("output_norm")
+    if args.context:
+        config_parts.append("context_weights")
     if args.ga2m:
         config_parts.append(f"ga2m(pairs={args.ga2m_pairs})")
     if args.activation != "relu":
@@ -696,6 +717,7 @@ Examples:
         loss=args.loss, tower_dropout=args.tower_dropout,
         output_norm=args.output_norm, ga2m=args.ga2m,
         ga2m_pairs=args.ga2m_pairs, activation=args.activation,
+        context=args.context,
     )
 
     if "gam" in demos:

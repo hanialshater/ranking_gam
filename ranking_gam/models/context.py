@@ -3,6 +3,10 @@ Context-present ranking GA2M (Paper Section 4.2 + interactions).
 
 Supports numerical and categorical context features with learned
 importance weights over item-level shape functions.
+
+Also provides ContextGAM: a simpler self-context model where all item
+features serve as both input and context, producing per-feature importance
+weights via a shared context network.
 """
 
 import numpy as np
@@ -10,7 +14,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .towers import PaperTower
+from .towers import PaperTower, LearnableMonotoneTransform
 
 
 class ContextWeightNetwork(nn.Module):
@@ -208,3 +212,173 @@ class ContextPresentGA2M(nn.Module):
         with torch.no_grad():
             alpha_k = self.context_towers[context_idx](q_t)
             return alpha_k[:, feature_idx].cpu().numpy()
+
+
+class ContextGAM(nn.Module):
+    """
+    Self-context GAM: per-feature towers + shared context network.
+
+    score = sum_j w_j(x) * f_j(x_j) + bias
+
+    where w = softmax(context_net(x)) produces per-feature importance weights
+    from the full feature vector, and f_j is a per-feature MLP tower.
+
+    Same forward(x) signature as GAM_Paper -- works with existing training loop.
+
+    Interpretability:
+      - Tower shapes f_j(x_j) are single-variable functions (distillable to PWL)
+      - Context weights w_j(x) are query-dependent but inspectable per-query
+      - The context network is a small MLP (~14K params for 136 features)
+
+    Distillation:
+      - Towers f_j -> PWL via greedy knot selection (same as GAM_Paper)
+      - Context network w_j(x) -> kept as small neural net (136-dim input,
+        can't reduce to 1D lookup, but cheap: one matrix multiply at serving)
+    """
+
+    def __init__(
+        self,
+        num_features=136,
+        hidden_dims=None,
+        context_hidden=None,
+        dropout=0.0,
+        residual=False,
+        input_norm=False,
+        feature_transforms=False,
+        num_transform_knots=20,
+        tower_dropout=0.0,
+        output_norm=False,
+        activation="relu",
+    ):
+        super().__init__()
+        if hidden_dims is None:
+            hidden_dims = [16, 8]
+        if context_hidden is None:
+            context_hidden = [64, 32]
+
+        self.num_features = num_features
+        self.tower_dropout_rate = tower_dropout
+        self.output_norm = output_norm
+
+        # Per-feature towers (same as GAM_Paper)
+        self.towers = nn.ModuleList(
+            [PaperTower(1, hidden_dims, dropout, residual, input_norm, activation=activation)
+             for _ in range(num_features)]
+        )
+
+        # Feature transforms (optional)
+        self.feature_transforms = None
+        if feature_transforms:
+            self.feature_transforms = nn.ModuleList(
+                [LearnableMonotoneTransform(num_knots=num_transform_knots)
+                 for _ in range(num_features)]
+            )
+
+        # Shared context network: all features -> per-feature weights
+        layers = []
+        prev = num_features
+        for h in context_hidden:
+            layers.append(nn.Linear(prev, h))
+            layers.append(nn.BatchNorm1d(h))
+            layers.append(nn.ReLU())
+            if dropout > 0:
+                layers.append(nn.Dropout(dropout))
+            prev = h
+        layers.append(nn.Linear(prev, num_features))
+        self.context_net = nn.Sequential(*layers)
+
+        if output_norm:
+            self.tower_norm = nn.BatchNorm1d(num_features, affine=False)
+
+        self.global_bias = nn.Parameter(torch.zeros(1))
+
+    def init_transforms_from_data(self, X):
+        """Initialize feature transforms from training data percentiles."""
+        if self.feature_transforms is None:
+            return
+        for j, transform in enumerate(self.feature_transforms):
+            transform.init_from_data(X[:, :, j])
+
+    def forward(self, x):
+        """x: [batch, list_size, num_features] -> [batch, list_size]."""
+        B, L, n = x.shape
+        x_flat = x.view(B * L, n)
+
+        # Per-feature tower outputs
+        tower_outputs = []
+        for i, tower in enumerate(self.towers):
+            feat = x_flat[:, i : i + 1]
+            if self.feature_transforms is not None:
+                feat = self.feature_transforms[i](feat)
+            tower_outputs.append(tower(feat))
+        tower_out = torch.cat(tower_outputs, dim=-1)  # [B*L, n]
+
+        # Tower dropout
+        if self.tower_dropout_rate > 0 and self.training:
+            mask = torch.bernoulli(
+                torch.full((1, n), 1 - self.tower_dropout_rate, device=tower_out.device)
+            )
+            tower_out = tower_out * mask / (1 - self.tower_dropout_rate)
+
+        # Output normalization
+        if self.output_norm:
+            tower_out = self.tower_norm(tower_out)
+
+        # Context weights from all features (softmax -> sums to 1)
+        # Scale by num_features so total magnitude is comparable to pure sum
+        weights = F.softmax(self.context_net(x_flat), dim=-1)  # [B*L, n]
+        scores = n * (weights * tower_out).sum(dim=-1)
+
+        return scores.view(B, L) + self.global_bias
+
+    def get_main_effect(self, feature_idx, x_values):
+        """Tower shape without context weighting (for distillation/viz)."""
+        self.eval()
+        x_t = torch.tensor(x_values, dtype=torch.float32).reshape(-1, 1)
+        x_t = x_t.to(next(self.parameters()).device)
+        with torch.no_grad():
+            feat = x_t
+            if self.feature_transforms is not None:
+                feat = self.feature_transforms[feature_idx](feat)
+            return self.towers[feature_idx](feat).cpu().numpy().flatten()
+
+    def get_context_weights(self, x_single):
+        """Get context weights for a single document.
+
+        Args:
+            x_single: [num_features] numpy array (one document's features)
+        Returns:
+            [num_features] numpy array of weights (sum to 1)
+        """
+        self.eval()
+        x_t = torch.tensor(x_single, dtype=torch.float32).reshape(1, -1)
+        x_t = x_t.to(next(self.parameters()).device)
+        with torch.no_grad():
+            w = F.softmax(self.context_net(x_t), dim=-1)
+            return w.cpu().numpy().flatten()
+
+    def explain(self, x_single):
+        """Per-feature attribution for a single document.
+
+        Returns dict with tower outputs, context weights, and weighted contributions.
+        """
+        self.eval()
+        x_t = torch.tensor(x_single, dtype=torch.float32).reshape(1, -1)
+        x_t = x_t.to(next(self.parameters()).device)
+        n = self.num_features
+        with torch.no_grad():
+            tower_vals = []
+            for i, tower in enumerate(self.towers):
+                feat = x_t[:, i : i + 1]
+                if self.feature_transforms is not None:
+                    feat = self.feature_transforms[i](feat)
+                tower_vals.append(tower(feat).item())
+            tower_vals = np.array(tower_vals)
+            weights = F.softmax(self.context_net(x_t), dim=-1).cpu().numpy().flatten()
+            contributions = n * weights * tower_vals
+        return {
+            "tower_outputs": tower_vals,
+            "context_weights": weights,
+            "contributions": contributions,
+            "score": float(contributions.sum() + self.global_bias.item()),
+        }

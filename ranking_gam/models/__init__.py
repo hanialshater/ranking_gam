@@ -2,7 +2,7 @@
 
 from .towers import PaperTower, ConcavePWL, MonotonePWL, LearnableMonotoneTransform
 from .gam import GAM_Paper, GA2M_Paper
-from .context import ContextWeightNetwork, ContextPresentGA2M
+from .context import ContextWeightNetwork, ContextPresentGA2M, ContextGAM
 from .groupwise import GroupwiseFeatureComputer
 from .submodular import SubmodularRankingGAM
 from .multi_objective import MultiObjectiveRankingGAM
@@ -16,6 +16,7 @@ __all__ = [
     "GA2M_Paper",
     "ContextWeightNetwork",
     "ContextPresentGA2M",
+    "ContextGAM",
     "GroupwiseFeatureComputer",
     "SubmodularRankingGAM",
     "MultiObjectiveRankingGAM",
