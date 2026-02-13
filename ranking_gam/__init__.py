@@ -64,6 +64,13 @@ def __getattr__(name):
         "load_mslr": (".data", "load_mslr"),
         # Interactions
         "select_interactions_correlation": (".interactions", "select_interactions_correlation"),
+        # Item boosting
+        "compute_boost_delta": (".boosting", "compute_boost_delta"),
+        "boost_items": (".boosting", "boost_items"),
+        "get_percentile_value": (".boosting", "get_percentile_value"),
+        "explain_boost": (".boosting", "explain_boost"),
+        "warmup_blend": (".boosting", "warmup_blend"),
+        "warmup_boost_items": (".boosting", "warmup_boost_items"),
     }
 
     if name in _import_map:
@@ -123,4 +130,11 @@ __all__ = [
     "load_mslr",
     # Interactions
     "select_interactions_correlation",
+    # Item boosting
+    "compute_boost_delta",
+    "boost_items",
+    "get_percentile_value",
+    "explain_boost",
+    "warmup_blend",
+    "warmup_boost_items",
 ]

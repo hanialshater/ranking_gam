@@ -7,6 +7,7 @@ Individual demos (each is self-contained):
     python examples/demo_submodular.py    # SubmodularRankingGAM (diversity)
     python examples/demo_multi.py         # Multi-Objective (weight scenarios)
     python examples/demo_gbdt.py          # GBDT residual boosting (3-stage)
+    python examples/demo_boost.py         # Item boosting via response curves
 
 This wrapper runs all or selected demos with shared args:
     python examples/demo.py                           # run all
@@ -23,7 +24,7 @@ from _common import (
     add_common_args, load_data, print_config, resolve_args,
 )
 
-DEMO_CHOICES = {"gam", "submodular", "multi", "gbdt"}
+DEMO_CHOICES = {"gam", "submodular", "multi", "gbdt", "boost"}
 
 
 def main():
@@ -36,6 +37,7 @@ Demo choices:
   submodular   SubmodularRankingGAM with diversity evaluation
   multi        Multi-Objective Ranking GAM with weight scenarios
   gbdt         GBDT residual boosting (3-stage pipeline)
+  boost        Item boosting via response curve manipulation (cold-start)
 
 Examples:
   python examples/demo.py --demo gam --loss ndcg2pp --activation silu
@@ -58,6 +60,13 @@ Examples:
     parser.add_argument("--ga2m-pairs", type=int, default=20)
     parser.add_argument("--tower-dropout", type=float, default=0.0)
     parser.add_argument("--output-norm", action="store_true")
+    # Boost-specific
+    parser.add_argument("--boost-feature", type=int, default=0,
+                        help="feature index to boost (boost demo only)")
+    parser.add_argument("--boost-percentile", type=float, default=75,
+                        help="target percentile for boosted items (boost demo only)")
+    parser.add_argument("--cold-start-fraction", type=float, default=0.1,
+                        help="fraction of items to treat as cold-start (boost demo only)")
     args = resolve_args(parser.parse_args())
 
     # Parse demo selection
@@ -95,6 +104,27 @@ Examples:
     if "gbdt" in demos:
         from demo_gbdt import run as run_gbdt
         results.update(run_gbdt(data, args))
+
+    if "boost" in demos:
+        from demo_boost import main as run_boost_main
+        # boost demo has its own argparse, so we just call it with sys.argv
+        # For the wrapper, we re-run with the shared args
+        import sys
+        saved_argv = sys.argv
+        boost_argv = ["demo_boost.py",
+                       f"--epochs={args.epochs}", f"--k={args.k}",
+                       f"--loss={args.loss}", f"--activation={args.activation}",
+                       f"--lr-schedule={args.lr_schedule}",
+                       f"--boost-feature={args.boost_feature}",
+                       f"--boost-percentile={args.boost_percentile}",
+                       f"--cold-start-fraction={args.cold_start_fraction}"]
+        if not args.transforms:
+            boost_argv.append("--no-transforms")
+        if not args.residual:
+            boost_argv.append("--no-residual")
+        sys.argv = boost_argv
+        run_boost_main()
+        sys.argv = saved_argv
 
     # Summary
     if results:
