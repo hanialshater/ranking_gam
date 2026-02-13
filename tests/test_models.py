@@ -4,11 +4,11 @@ import numpy as np
 import torch
 
 from ranking_gam.models import (
-    GAM_Paper,
-    GA2M_Paper,
     ContextPresentGA2M,
-    SubmodularRankingGAM,
+    GA2M_Paper,
+    GAM_Paper,
     MultiObjectiveRankingGAM,
+    SubmodularRankingGAM,
 )
 
 
@@ -43,7 +43,7 @@ class TestGAMTowerDropout:
         model = GAM_Paper(num_features=X.shape[-1], hidden_dims=[8, 4], tower_dropout=0.3)
         model.train()
         out1 = model(X)
-        out2 = model(X)
+        _ = model(X)
         # With dropout, outputs should differ between calls (stochastic)
         assert out1.shape == (X.shape[0], X.shape[1])
         # Not guaranteed to differ on tiny data, but shape must be right
@@ -192,7 +192,7 @@ class TestContextPresentGA2M:
 class TestSubmodularRankingGAM:
     def _make_model(self):
         specs = [
-            {"name": "cat_novelty", "type": "category_novelty", "column": 8, "x_min": 0, "x_max": 1},
+            {"name": "cat_novelty", "type": "category_novelty", "column": 7, "x_min": 0, "x_max": 1},
             {"name": "price_spread", "type": "price_spread", "column": 3, "x_min": 0, "x_max": 3},
         ]
         return SubmodularRankingGAM(
@@ -303,7 +303,7 @@ class TestMultiObjectiveRankingGAM:
             {
                 "name": "diversity", "type": "groupwise",
                 "groupwise_specs": [
-                    {"name": "cat_nov", "type": "category_novelty", "column": 8, "x_min": 0, "x_max": 1},
+                    {"name": "cat_nov", "type": "category_novelty", "column": 7, "x_min": 0, "x_max": 1},
                 ],
                 "weight": 0.2,
             },

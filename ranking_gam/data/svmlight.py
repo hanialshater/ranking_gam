@@ -8,7 +8,6 @@ This module provides a shared parser so each dataset loader only needs to
 handle download/path logic and call the generic routines.
 """
 
-import glob
 import os
 import tarfile
 import urllib.request
@@ -83,20 +82,20 @@ def prepare_arrays(queries, num_features, list_size=40, log1p=True,
     X_list, y_list = [], []
     for q in queries.values():
         f = np.array(q["features"], dtype=np.float32)
-        l = np.array(q["labels"], dtype=np.float32)
-        n = len(l)
+        labels = np.array(q["labels"], dtype=np.float32)
+        n = len(labels)
         if n == 0:
             continue
         if n < list_size:
             f = np.vstack(
                 [f, np.zeros((list_size - n, num_features), dtype=np.float32)]
             )
-            l = np.concatenate([l, np.full(list_size - n, -1.0)])
+            labels = np.concatenate([labels, np.full(list_size - n, -1.0)])
         else:
-            idx = np.argsort(-l)[:list_size]
-            f, l = f[idx], l[idx]
+            idx = np.argsort(-labels)[:list_size]
+            f, labels = f[idx], labels[idx]
         X_list.append(f)
-        y_list.append(l)
+        y_list.append(labels)
 
     X = np.stack(X_list)
     y = np.stack(y_list)

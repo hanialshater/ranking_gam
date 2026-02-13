@@ -1,7 +1,8 @@
 """Feature interaction selection for GA2M models."""
 
-import numpy as np
 from itertools import combinations
+
+import numpy as np
 
 
 def select_interactions_correlation(X, y, top_k=50):

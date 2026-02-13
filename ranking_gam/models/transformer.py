@@ -15,9 +15,7 @@ Architecture:
     Output: [B, L] scores
 """
 
-import torch
 import torch.nn as nn
-import math
 
 
 class TransformerRanker(nn.Module):

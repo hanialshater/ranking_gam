@@ -10,10 +10,10 @@ Supported datasets:
     mq2008   — LETOR 4.0 MQ2008 (46 features, free)
 """
 
-from .mslr import load_mslr, load_mslr30k, MSLR_NUM_FEATURES, MSLR_FEATURE_NAMES
-from .yahoo import load_yahoo, YAHOO_SET1_NUM_FEATURES, YAHOO_SET2_NUM_FEATURES
-from .istella import load_istella, ISTELLA_NUM_FEATURES
-from .letor import load_mq2007, load_mq2008, LETOR_NUM_FEATURES, LETOR_FEATURE_NAMES
+from .istella import ISTELLA_NUM_FEATURES, load_istella
+from .letor import LETOR_FEATURE_NAMES, LETOR_NUM_FEATURES, load_mq2007, load_mq2008
+from .mslr import MSLR_FEATURE_NAMES, MSLR_NUM_FEATURES, load_mslr, load_mslr30k
+from .yahoo import YAHOO_SET1_NUM_FEATURES, YAHOO_SET2_NUM_FEATURES, load_yahoo
 
 # Dataset registry: name -> (loader_func, num_features, kwargs)
 DATASET_REGISTRY = {

@@ -82,6 +82,10 @@ class ListNetLoss(nn.Module):
         y_true_c = y_true.clone().float()
 
         padded = y_true_c < 0
+        valid_queries = (~padded).any(dim=-1)
+        if not valid_queries.any():
+            return torch.tensor(0.0, device=y_pred.device, requires_grad=True)
+
         y_pred_c[padded] = float("-inf")
         y_true_c[padded] = float("-inf")
 

@@ -1,11 +1,11 @@
 """Model architectures for interpretable ranking."""
 
-from .towers import PaperTower, ConcavePWL, MonotonePWL, LearnableMonotoneTransform
-from .gam import GAM_Paper, GA2M_Paper
-from .context import ContextWeightNetwork, ContextPresentGA2M, ContextGAM
+from .context import ContextGAM, ContextPresentGA2M, ContextWeightNetwork
+from .gam import GA2M_Paper, GAM_Paper
 from .groupwise import GroupwiseFeatureComputer
-from .submodular import SubmodularRankingGAM
 from .multi_objective import MultiObjectiveRankingGAM
+from .submodular import SubmodularRankingGAM
+from .towers import ConcavePWL, LearnableMonotoneTransform, MonotonePWL, PaperTower
 from .transformer import TransformerRanker
 
 __all__ = [

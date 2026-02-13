@@ -14,7 +14,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .towers import PaperTower, LearnableMonotoneTransform
+from .towers import LearnableMonotoneTransform, PaperTower
 
 
 class ContextWeightNetwork(nn.Module):

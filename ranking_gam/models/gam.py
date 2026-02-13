@@ -7,11 +7,10 @@ GA2M_Paper: main effects + pairwise interaction towers.
 Matches Zhuang et al. WSDM 2021 Section 4.1.
 """
 
-import numpy as np
 import torch
 import torch.nn as nn
 
-from .towers import PaperTower, LearnableMonotoneTransform
+from .towers import LearnableMonotoneTransform, PaperTower
 
 
 class GA2M_Paper(nn.Module):

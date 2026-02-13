@@ -10,7 +10,6 @@ Includes:
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 
 def _pava_l2_non_decreasing(y_np):
