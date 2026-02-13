@@ -47,7 +47,8 @@ def main():
              f"heads={args.nhead}"]
     print_config(args, extra)
 
-    data = load_data()
+    data = load_data(dataset=args.dataset, data_dir=args.data_dir)
+    num_features = data["num_features"]
     results = {}
 
     # --- Train Transformer ---
@@ -56,7 +57,7 @@ def main():
     print("=" * 70)
 
     transformer = rg.TransformerRanker(
-        num_features=136,
+        num_features=num_features,
         d_model=args.d_model,
         nhead=args.nhead,
         num_layers=args.num_layers,
@@ -83,7 +84,7 @@ def main():
         print("=" * 70)
 
         gam = rg.GAM_Paper(
-            num_features=136, hidden_dims=[16, 8],
+            num_features=num_features, hidden_dims=[16, 8],
             feature_transforms=args.transforms, residual=args.residual,
             activation=args.activation,
         )

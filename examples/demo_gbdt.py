@@ -35,7 +35,7 @@ def main():
     args = resolve_args(parser.parse_args())
     print_config(args)
 
-    data = load_data()
+    data = load_data(dataset=args.dataset, data_dir=args.data_dir)
     results = run(data, args)
 
     print("\n" + "=" * 70)
@@ -48,6 +48,7 @@ def main():
 def run(data, args):
     """Run 3-stage GBDT boosting pipeline. Returns results dict."""
     K = args.k
+    num_features = data["num_features"]
 
     print("\n" + "=" * 70)
     print("GAM + GBDT Magic Curve (Residual Boosting)")
@@ -71,7 +72,7 @@ def run(data, args):
     # --- Stage 1: Train GAM on raw features ---
     print("\n  [Stage 1] Training GAM on raw features...")
     gam = rg.GAM_Paper(
-        num_features=136, hidden_dims=[16, 8],
+        num_features=num_features, hidden_dims=[16, 8],
         feature_transforms=args.transforms, residual=args.residual,
         activation=args.activation,
     )
@@ -119,24 +120,24 @@ def run(data, args):
     eval_X_boosted = compute_gbdt_residual_feature(gbdt_residual, data["eval_X"])
 
     boosted_gam = rg.GAM_Paper(
-        num_features=137, hidden_dims=[16, 8],
+        num_features=num_features + 1, hidden_dims=[16, 8],
         feature_transforms=args.transforms, residual=args.residual,
         activation=args.activation,
     )
 
-    # Copy trained weights from Stage 1 into first 136 towers
+    # Copy trained weights from Stage 1 into first N towers
     with torch.no_grad():
-        for j in range(136):
+        for j in range(num_features):
             boosted_gam.towers[j].load_state_dict(gam.towers[j].state_dict())
         if args.transforms:
-            for j in range(136):
+            for j in range(num_features):
                 boosted_gam.feature_transforms[j].load_state_dict(
                     gam.feature_transforms[j].state_dict()
                 )
             boosted_gam.init_transforms_from_data(train_X_boosted)
 
     # Freeze original towers
-    for j in range(136):
+    for j in range(num_features):
         for param in boosted_gam.towers[j].parameters():
             param.requires_grad = False
         if args.transforms:
@@ -168,8 +169,8 @@ def run(data, args):
     )
 
     print(f"\n  Summary:")
-    print(f"    GAM only (136 towers):         NDCG@{K} = {gam_ndcg:.4f}")
-    print(f"    GAM + magic curve (137 towers): NDCG@{K} = {boosted_ndcg:.4f}")
+    print(f"    GAM only ({num_features} towers):         NDCG@{K} = {gam_ndcg:.4f}")
+    print(f"    GAM + magic curve ({num_features+1} towers): NDCG@{K} = {boosted_ndcg:.4f}")
     print(f"    GBDT standalone (black box):    NDCG@{K} = {gbdt_standalone_ndcg:.4f}")
     delta = boosted_ndcg - gam_ndcg
     print(f"    Magic curve gain:               {delta:+.4f}")
@@ -178,7 +179,7 @@ def run(data, args):
     boosted_gam.eval()
     fig, ax = plt.subplots(1, 1, figsize=(6, 4))
     x_vals = np.linspace(0, 1, 100).astype(np.float32)
-    effect = boosted_gam.get_main_effect(136, x_vals)
+    effect = boosted_gam.get_main_effect(num_features, x_vals)
     ax.plot(x_vals, effect, linewidth=2, color="#e74c3c")
     ax.set_xlabel("GBDT residual score (normalized)")
     ax.set_ylabel("Tower output")

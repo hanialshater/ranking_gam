@@ -33,14 +33,14 @@ def main():
     args = resolve_args(parser.parse_args())
     print_config(args)
 
-    data = load_data()
+    data = load_data(dataset=args.dataset, data_dir=args.data_dir)
     run(data, args)
 
 
 def run(data, args):
     """Run MultiObjectiveRankingGAM training + scenario evaluation."""
     K = args.k
-    num_base = 136
+    num_base = data["num_features"]
     qpe = getattr(args, "queries_per_epoch", 400)
 
     print("\n" + "=" * 70)
@@ -58,7 +58,7 @@ def run(data, args):
         {
             "name": "revenue",
             "type": "pointwise",
-            "features": [10],
+            "features": [min(10, num_base - 1)],
             "tower": "monotone",
             "x_min": 0.0,
             "x_max": 1.0,
@@ -73,7 +73,7 @@ def run(data, args):
         {
             "name": "freshness",
             "type": "pointwise",
-            "features": [20],
+            "features": [min(20, num_base - 1)],
             "tower": "monotone",
             "x_min": 0.0,
             "x_max": 1.0,
@@ -115,7 +115,7 @@ def run(data, args):
         m = rg.evaluate_ranking_diversity(
             data["eval_X_aug"][: len(orders)], data["eval_y"][: len(orders)],
             orders, k=K,
-            cat_col=num_base, brand_col=num_base + 1, price_col=10,
+            cat_col=num_base, brand_col=num_base + 1, price_col=min(10, num_base - 1),
         )
         scenario_metrics[name] = m
         print(f"  {name:<18} NDCG={m['ndcg']:.4f}  ILD={m['ild']:.4f}")

@@ -16,7 +16,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 import ranking_gam as rg
-from ranking_gam.data.mslr import MSLR_FEATURE_NAMES
 from ranking_gam.viz import plot_response_curves
 
 from _common import (
@@ -51,7 +50,7 @@ def main():
         extra.append("output_norm")
     print_config(args, extra)
 
-    data = load_data()
+    data = load_data(dataset=args.dataset, data_dir=args.data_dir)
     results = run(data, args)
 
     print("\n" + "=" * 70)
@@ -71,6 +70,7 @@ def run(data, args):
         model_name = "GAM"
 
     K = args.k
+    num_features = data["num_features"]
     print("\n" + "=" * 70)
     print(f"{model_name} -- Interpretable Ranking")
     print("=" * 70)
@@ -88,7 +88,7 @@ def run(data, args):
 
     if args.context:
         model = rg.ContextGAM(
-            num_features=136, hidden_dims=[16, 8],
+            num_features=num_features, hidden_dims=[16, 8],
             context_hidden=[64, 32],
             feature_transforms=args.transforms, residual=args.residual,
             tower_dropout=tower_dropout, output_norm=output_norm,
@@ -96,7 +96,7 @@ def run(data, args):
         )
     elif args.ga2m:
         model = rg.GA2M_Paper(
-            num_features=136, hidden_dims=[16, 8],
+            num_features=num_features, hidden_dims=[16, 8],
             interaction_pairs=interaction_pairs,
             feature_transforms=args.transforms, residual=args.residual,
             tower_dropout=tower_dropout, output_norm=output_norm,
@@ -104,7 +104,7 @@ def run(data, args):
         )
     else:
         model = rg.GAM_Paper(
-            num_features=136, hidden_dims=[16, 8],
+            num_features=num_features, hidden_dims=[16, 8],
             feature_transforms=args.transforms, residual=args.residual,
             tower_dropout=tower_dropout, output_norm=output_norm,
             activation=args.activation,
@@ -125,8 +125,16 @@ def run(data, args):
     print(f"\n{model_name} ({args.loss}): NDCG@{K} = {ndcg:.4f}")
 
     # --- Response curves ---
+    feature_names = [f"f_{i}" for i in range(num_features)]
+    try:
+        from ranking_gam.data.mslr import MSLR_FEATURE_NAMES
+        if num_features == 136:
+            feature_names = MSLR_FEATURE_NAMES
+    except ImportError:
+        pass
+
     fig = plot_response_curves(
-        model, feature_names=MSLR_FEATURE_NAMES, data=data["X_flat"], top_k=15,
+        model, feature_names=feature_names, data=data["X_flat"], top_k=15,
     )
     fig.savefig(f"response_curves_{model_name.lower()}.png", dpi=150, bbox_inches="tight")
     plt.close(fig)
@@ -161,7 +169,7 @@ def run(data, args):
         p = pwl["main_effects"][feat_idx]
         ax = axes[ax_idx]
         ax.plot(p["x"], p["y"], "o-", color="#e74c3c", linewidth=2, markersize=4)
-        fname = MSLR_FEATURE_NAMES[feat_idx] if feat_idx < len(MSLR_FEATURE_NAMES) else f"f{feat_idx}"
+        fname = feature_names[feat_idx] if feat_idx < len(feature_names) else f"f{feat_idx}"
         ax.set_title(f"{fname} (K={len(p['x'])})", fontsize=9)
         ax.grid(True, alpha=0.3)
     fig_pwl.suptitle(f"Distilled PWL Response Curves (NDCG@{K}={pwl_ndcg:.4f})", fontsize=14)

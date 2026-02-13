@@ -33,7 +33,7 @@ def main():
     args = resolve_args(parser.parse_args())
     print_config(args)
 
-    data = load_data()
+    data = load_data(dataset=args.dataset, data_dir=args.data_dir)
     results = run(data, args)
 
     print("\n" + "=" * 70)
@@ -46,7 +46,7 @@ def main():
 def run(data, args):
     """Run SubmodularRankingGAM training + diversity evaluation. Returns results dict."""
     K = args.k
-    num_base = 136
+    num_base = data["num_features"]
 
     print("\n" + "=" * 70)
     print("SubmodularRankingGAM -- Diversity with Greedy Guarantees")
@@ -95,11 +95,11 @@ def run(data, args):
 
     base_metrics = rg.evaluate_ranking_diversity(
         data["eval_X_aug"], data["eval_y"], base_orders, k=K,
-        cat_col=num_base, brand_col=num_base + 1, price_col=10,
+        cat_col=num_base, brand_col=num_base + 1, price_col=min(10, num_base - 1),
     )
     greedy_metrics = rg.evaluate_ranking_diversity(
         data["eval_X_aug"], data["eval_y"], greedy_orders, k=K,
-        cat_col=num_base, brand_col=num_base + 1, price_col=10,
+        cat_col=num_base, brand_col=num_base + 1, price_col=min(10, num_base - 1),
     )
 
     print_diversity_comparison(base_metrics, greedy_metrics)

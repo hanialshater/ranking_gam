@@ -24,7 +24,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 import ranking_gam as rg
-from ranking_gam.data.mslr import MSLR_FEATURE_NAMES
 from ranking_gam.viz import plot_response_curves
 
 from _common import (
@@ -46,7 +45,8 @@ def main():
     print_config(args, [f"boost_feature={args.boost_feature}",
                          f"boost_pctile={args.boost_percentile}"])
 
-    data = load_data()
+    data = load_data(dataset=args.dataset, data_dir=args.data_dir)
+    num_features = data["num_features"]
 
     # --- Train GAM ---
     print("\n" + "=" * 70)
@@ -54,7 +54,7 @@ def main():
     print("=" * 70)
 
     model = rg.GAM_Paper(
-        num_features=136, hidden_dims=[16, 8],
+        num_features=num_features, hidden_dims=[16, 8],
         feature_transforms=args.transforms, residual=args.residual,
         activation=args.activation,
     )
@@ -72,7 +72,13 @@ def main():
 
     # --- Boosting analysis ---
     feat_idx = args.boost_feature
-    feat_name = MSLR_FEATURE_NAMES[feat_idx] if feat_idx < len(MSLR_FEATURE_NAMES) else f"feature_{feat_idx}"
+    feat_name = f"feature_{feat_idx}"
+    try:
+        from ranking_gam.data.mslr import MSLR_FEATURE_NAMES
+        if num_features == 136 and feat_idx < len(MSLR_FEATURE_NAMES):
+            feat_name = MSLR_FEATURE_NAMES[feat_idx]
+    except ImportError:
+        pass
 
     print("\n" + "=" * 70)
     print(f"Item Boosting: {feat_name} (feature {feat_idx})")

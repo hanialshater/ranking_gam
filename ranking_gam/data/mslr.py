@@ -1,8 +1,10 @@
 """
-MSLR-WEB10K data loading and preprocessing.
+MSLR-WEB10K / MSLR-WEB30K data loading.
 
-Downloads the dataset if not found locally, parses the SVMLight format,
-pads/truncates lists to a fixed size, and applies log1p transform.
+Downloads MSLR-WEB10K automatically if not found locally.
+MSLR-WEB30K requires manual download from Microsoft Research.
+
+Both datasets: 136 features, 5-level relevance (0-4), SVMLight format.
 """
 
 import glob
@@ -10,12 +12,26 @@ import os
 import urllib.request
 import zipfile
 
-import numpy as np
+from .svmlight import load_svmlight_dataset
+
+MSLR_NUM_FEATURES = 136
+
+
+def _find_split_files(data_dir, dataset_name):
+    """Search common directory layouts for train.txt / test.txt."""
+    search_paths = [
+        f"{data_dir}/{dataset_name}/Fold1",
+        f"{data_dir}/Fold1",
+        data_dir,
+    ]
+    for p in search_paths:
+        if os.path.exists(f"{p}/train.txt"):
+            return f"{p}/train.txt", f"{p}/test.txt"
+    return None, None
 
 
 def load_mslr(data_dir="data", max_train=6000, max_eval=2000, list_size=40):
-    """
-    Load MSLR-WEB10K (Fold1) for learning-to-rank experiments.
+    """Load MSLR-WEB10K (Fold1) for learning-to-rank experiments.
 
     Downloads automatically if not present.
 
@@ -32,11 +48,7 @@ def load_mslr(data_dir="data", max_train=6000, max_eval=2000, list_size=40):
     """
     os.makedirs(data_dir, exist_ok=True)
 
-    train_path = test_path = None
-    for p in [f"{data_dir}/MSLR-WEB10K/Fold1", f"{data_dir}/Fold1", data_dir]:
-        if os.path.exists(f"{p}/train.txt"):
-            train_path, test_path = f"{p}/train.txt", f"{p}/test.txt"
-            break
+    train_path, test_path = _find_split_files(data_dir, "MSLR-WEB10K")
 
     if not train_path:
         print("Downloading MSLR-WEB10K...")
@@ -51,63 +63,59 @@ def load_mslr(data_dir="data", max_train=6000, max_eval=2000, list_size=40):
         train_path = glob.glob(f"{data_dir}/**/train.txt", recursive=True)[0]
         test_path = train_path.replace("train.txt", "test.txt")
 
-    def parse(path, max_q):
-        queries = {}
-        with open(path) as f:
-            for line in f:
-                parts = line.split()
-                if len(parts) < 2:
-                    continue
-                label = float(parts[0])
-                qid = next(
-                    (p.split(":")[1] for p in parts if p.startswith("qid:")), None
-                )
-                if not qid:
-                    continue
-                feats = {
-                    int(p.split(":")[0]): float(p.split(":")[1])
-                    for p in parts[1:]
-                    if ":" in p and not p.startswith("qid:")
-                }
-                if qid not in queries:
-                    if len(queries) >= max_q:
-                        continue
-                    queries[qid] = {"f": [], "l": []}
-                queries[qid]["l"].append(label)
-                queries[qid]["f"].append([feats.get(i, 0.0) for i in range(1, 137)])
-        return queries
-
-    def prepare(queries):
-        X, y = [], []
-        for q in queries.values():
-            f = np.array(q["f"], dtype=np.float32)
-            l = np.array(q["l"], dtype=np.float32)
-            n = len(l)
-            if n == 0:
-                continue
-            if n < list_size:
-                f = np.vstack(
-                    [f, np.zeros((list_size - n, 136), dtype=np.float32)]
-                )
-                l = np.concatenate([l, np.full(list_size - n, -1.0)])
-            else:
-                idx = np.argsort(-l)[:list_size]
-                f, l = f[idx], l[idx]
-            X.append(f)
-            y.append(l)
-        X = np.stack(X)
-        y = np.stack(y)
-        X = np.sign(X) * np.log1p(np.abs(X))
-        return X.astype(np.float32), y.astype(np.float32)
-
-    print("Loading data...")
-    train_X, train_y = prepare(parse(train_path, max_train))
-    eval_X, eval_y = prepare(parse(test_path, max_eval))
-    print(f"Train: {train_X.shape}, Eval: {eval_X.shape}")
-    return train_X, train_y, eval_X, eval_y
+    return load_svmlight_dataset(
+        train_path, test_path, MSLR_NUM_FEATURES,
+        max_train=max_train, max_eval=max_eval, list_size=list_size,
+        name="MSLR-WEB10K",
+    )
 
 
-# Abbreviated feature names for MSLR-WEB10K
+def load_mslr30k(data_dir="data", fold=1, max_train=6000, max_eval=2000,
+                 list_size=40):
+    """Load MSLR-WEB30K for learning-to-rank experiments.
+
+    Requires manual download from:
+        https://www.microsoft.com/en-us/research/project/mslr/
+
+    Expected directory structure:
+        data_dir/MSLR-WEB30K/Fold{fold}/train.txt
+        data_dir/MSLR-WEB30K/Fold{fold}/test.txt
+
+    Args:
+        data_dir: directory containing the MSLR-WEB30K folder
+        fold: which fold to use (1-5, default: 1)
+        max_train: max number of training queries
+        max_eval: max number of evaluation queries
+        list_size: pad/truncate each query to this many documents
+
+    Returns:
+        (train_X, train_y, eval_X, eval_y) as float32 numpy arrays
+        Same format as load_mslr().
+    """
+    fold_dir = os.path.join(data_dir, "MSLR-WEB30K", f"Fold{fold}")
+    train_path = os.path.join(fold_dir, "train.txt")
+    test_path = os.path.join(fold_dir, "test.txt")
+
+    if not os.path.exists(train_path):
+        # Also check flat layout
+        train_path2, test_path2 = _find_split_files(data_dir, "MSLR-WEB30K")
+        if train_path2:
+            train_path, test_path = train_path2, test_path2
+        else:
+            raise FileNotFoundError(
+                f"MSLR-WEB30K not found at {fold_dir}/.\n"
+                f"Download from: https://www.microsoft.com/en-us/research/project/mslr/\n"
+                f"Extract so that {fold_dir}/train.txt exists."
+            )
+
+    return load_svmlight_dataset(
+        train_path, test_path, MSLR_NUM_FEATURES,
+        max_train=max_train, max_eval=max_eval, list_size=list_size,
+        name=f"MSLR-WEB30K (Fold{fold})",
+    )
+
+
+# Abbreviated feature names for MSLR-WEB10K/30K
 MSLR_FEATURE_NAMES = [
     "BM25_body",
     "BM25_anchor",

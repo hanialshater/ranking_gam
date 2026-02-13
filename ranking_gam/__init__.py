@@ -63,6 +63,14 @@ def __getattr__(name):
         "evaluate_pwl": (".distill", "evaluate_pwl"),
         # Data
         "load_mslr": (".data", "load_mslr"),
+        "load_mslr30k": (".data", "load_mslr30k"),
+        "load_yahoo": (".data", "load_yahoo"),
+        "load_istella": (".data", "load_istella"),
+        "load_mq2007": (".data", "load_mq2007"),
+        "load_mq2008": (".data", "load_mq2008"),
+        "load_dataset": (".data", "load_dataset"),
+        "get_num_features": (".data", "get_num_features"),
+        "DATASET_NAMES": (".data", "DATASET_NAMES"),
         # Interactions
         "select_interactions_correlation": (".interactions", "select_interactions_correlation"),
         # Item boosting
@@ -130,6 +138,14 @@ __all__ = [
     "evaluate_pwl",
     # Data
     "load_mslr",
+    "load_mslr30k",
+    "load_yahoo",
+    "load_istella",
+    "load_mq2007",
+    "load_mq2008",
+    "load_dataset",
+    "get_num_features",
+    "DATASET_NAMES",
     # Interactions
     "select_interactions_correlation",
     # Item boosting

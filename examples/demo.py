@@ -86,7 +86,7 @@ Examples:
     print(f"Running demos: {', '.join(sorted(demos))}")
     print_config(args, extra)
 
-    data = load_data()
+    data = load_data(dataset=args.dataset, data_dir=args.data_dir)
     results = {}
 
     if "gam" in demos:
@@ -112,6 +112,7 @@ Examples:
         import sys
         saved_argv = sys.argv
         boost_argv = ["demo_boost.py",
+                       f"--dataset={args.dataset}", f"--data-dir={args.data_dir}",
                        f"--epochs={args.epochs}", f"--k={args.k}",
                        f"--loss={args.loss}", f"--activation={args.activation}",
                        f"--lr-schedule={args.lr_schedule}",
