@@ -330,3 +330,117 @@ def print_diversity_comparison(base_metrics, greedy_metrics, title="Relevance vs
             print(
                 f"    {labels.get(key, key):<23} {b:>10.4f}   {g:>10.4f}   {delta:>+8.4f} {arrow}"
             )
+
+
+def plot_pareto_front(scenario_metrics, x_metric="ndcg", y_metric="ild",
+                      x_label=None, y_label=None, title=None,
+                      colors=None, figsize=(8, 6)):
+    """Plot Pareto front of multi-objective ranking scenarios.
+
+    Each scenario is a point in (x_metric, y_metric) space. The Pareto front
+    connects non-dominated points.
+
+    Args:
+        scenario_metrics: dict of {scenario_name: metrics_dict}
+        x_metric: key for x-axis metric (default: "ndcg")
+        y_metric: key for y-axis metric (default: "ild")
+        x_label: axis label (default: auto from metric name)
+        y_label: axis label (default: auto from metric name)
+        title: plot title
+        colors: list of colors for scenarios
+        figsize: figure size
+
+    Returns:
+        matplotlib Figure
+    """
+    import matplotlib.pyplot as plt
+
+    if colors is None:
+        colors = ["#3498db", "#2ecc71", "#e74c3c", "#f39c12", "#9b59b6", "#1abc9c"]
+    if x_label is None:
+        x_label = x_metric.upper().replace("_", " ")
+    if y_label is None:
+        y_label = y_metric.upper().replace("_", " ")
+    if title is None:
+        title = f"Pareto Front: {x_label} vs {y_label}"
+
+    fig, ax = plt.subplots(1, 1, figsize=figsize)
+
+    names = list(scenario_metrics.keys())
+    xs = [scenario_metrics[n][x_metric] for n in names]
+    ys = [scenario_metrics[n][y_metric] for n in names]
+
+    for i, (name, x, y) in enumerate(zip(names, xs, ys)):
+        c = colors[i % len(colors)]
+        ax.scatter(x, y, s=120, color=c, zorder=5, edgecolors="white", linewidths=1.5)
+        ax.annotate(name, (x, y), textcoords="offset points", xytext=(8, 8),
+                    fontsize=10, color=c, fontweight="bold")
+
+    # Compute and draw Pareto front (maximize both metrics)
+    points = sorted(zip(xs, ys, names), key=lambda p: -p[0])
+    pareto_x, pareto_y = [], []
+    max_y = -float("inf")
+    for x, y, _ in points:
+        if y > max_y:
+            pareto_x.append(x)
+            pareto_y.append(y)
+            max_y = y
+    if len(pareto_x) > 1:
+        ax.plot(pareto_x, pareto_y, "--", color="#7f8c8d", linewidth=1.5,
+                alpha=0.7, label="Pareto front")
+
+    ax.set_xlabel(x_label, fontsize=12)
+    ax.set_ylabel(y_label, fontsize=12)
+    ax.set_title(title, fontsize=13, fontweight="bold")
+    ax.grid(True, alpha=0.3)
+    if len(pareto_x) > 1:
+        ax.legend(fontsize=10)
+    fig.tight_layout()
+    return fig
+
+
+def plot_objective_tradeoffs(scenario_metrics, objectives=None, figsize=(10, 5)):
+    """Plot grouped bar chart of metrics across scenarios.
+
+    Shows how each scenario scores on different objectives,
+    making the tradeoffs explicit.
+
+    Args:
+        scenario_metrics: dict of {scenario_name: metrics_dict}
+        objectives: list of metric keys to show (default: ndcg, ild, cat_coverage)
+        figsize: figure size
+
+    Returns:
+        matplotlib Figure
+    """
+    import matplotlib.pyplot as plt
+
+    names = list(scenario_metrics.keys())
+    if objectives is None:
+        objectives = ["ndcg", "ild", "cat_coverage", "brand_coverage"]
+        objectives = [o for o in objectives if o in scenario_metrics[names[0]]]
+
+    n_scenarios = len(names)
+    n_objectives = len(objectives)
+
+    colors = ["#3498db", "#2ecc71", "#e74c3c", "#f39c12", "#9b59b6",
+              "#1abc9c", "#e67e22", "#34495e"]
+
+    fig, ax = plt.subplots(1, 1, figsize=figsize)
+    x = np.arange(n_scenarios)
+    width = 0.8 / n_objectives
+
+    for i, obj in enumerate(objectives):
+        values = [scenario_metrics[n].get(obj, 0) for n in names]
+        offset = (i - n_objectives / 2 + 0.5) * width
+        ax.bar(x + offset, values, width, label=obj.replace("_", " "),
+               color=colors[i % len(colors)], alpha=0.85)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(names, fontsize=10)
+    ax.legend(fontsize=9, ncol=min(n_objectives, 4))
+    ax.set_ylabel("Metric value")
+    ax.set_title("Objective Tradeoffs Across Scenarios", fontsize=13, fontweight="bold")
+    ax.grid(True, alpha=0.3, axis="y")
+    fig.tight_layout()
+    return fig

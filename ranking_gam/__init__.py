@@ -34,6 +34,7 @@ def __getattr__(name):
         "GroupwiseFeatureComputer": (".models", "GroupwiseFeatureComputer"),
         "SubmodularRankingGAM": (".models", "SubmodularRankingGAM"),
         "MultiObjectiveRankingGAM": (".models", "MultiObjectiveRankingGAM"),
+        "TransformerRanker": (".models", "TransformerRanker"),
         # Losses
         "ApproxNDCGLoss": (".losses", "ApproxNDCGLoss"),
         "PairwiseLoss": (".losses", "PairwiseLoss"),
@@ -100,6 +101,7 @@ __all__ = [
     "GroupwiseFeatureComputer",
     "SubmodularRankingGAM",
     "MultiObjectiveRankingGAM",
+    "TransformerRanker",
     # Losses
     "ApproxNDCGLoss",
     "PairwiseLoss",

@@ -5,6 +5,8 @@ from .plots import (
     plot_diversity_curves,
     plot_spider,
     print_diversity_comparison,
+    plot_pareto_front,
+    plot_objective_tradeoffs,
 )
 
 __all__ = [
@@ -12,4 +14,6 @@ __all__ = [
     "plot_diversity_curves",
     "plot_spider",
     "print_diversity_comparison",
+    "plot_pareto_front",
+    "plot_objective_tradeoffs",
 ]

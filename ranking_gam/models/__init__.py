@@ -6,6 +6,7 @@ from .context import ContextWeightNetwork, ContextPresentGA2M, ContextGAM
 from .groupwise import GroupwiseFeatureComputer
 from .submodular import SubmodularRankingGAM
 from .multi_objective import MultiObjectiveRankingGAM
+from .transformer import TransformerRanker
 
 __all__ = [
     "PaperTower",
@@ -20,4 +21,5 @@ __all__ = [
     "GroupwiseFeatureComputer",
     "SubmodularRankingGAM",
     "MultiObjectiveRankingGAM",
+    "TransformerRanker",
 ]

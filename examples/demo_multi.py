@@ -16,7 +16,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 import ranking_gam as rg
-from ranking_gam.viz import plot_spider
+from ranking_gam.viz import plot_spider, plot_pareto_front, plot_objective_tradeoffs
 
 from _common import (
     add_common_args, device, groupwise_specs, load_data, print_config,
@@ -128,6 +128,26 @@ def run(data, args):
     fig.savefig("spider_weight_scenarios.png", dpi=150, bbox_inches="tight")
     plt.close(fig)
     print("  Saved: spider_weight_scenarios.png")
+
+    # Pareto front: NDCG vs ILD
+    fig_pareto = plot_pareto_front(
+        scenario_metrics, x_metric="ndcg", y_metric="ild",
+        x_label="NDCG@10 (Relevance)", y_label="ILD (Diversity)",
+        title="Pareto Front: Relevance vs Diversity",
+        colors=["#3498db", "#2ecc71", "#e74c3c", "#f39c12"],
+    )
+    fig_pareto.savefig("pareto_ndcg_vs_ild.png", dpi=150, bbox_inches="tight")
+    plt.close(fig_pareto)
+    print("  Saved: pareto_ndcg_vs_ild.png")
+
+    # Objective tradeoffs bar chart
+    fig_trade = plot_objective_tradeoffs(
+        scenario_metrics,
+        objectives=["ndcg", "ild", "cat_coverage", "brand_coverage"],
+    )
+    fig_trade.savefig("objective_tradeoffs.png", dpi=150, bbox_inches="tight")
+    plt.close(fig_trade)
+    print("  Saved: objective_tradeoffs.png")
 
     return scenario_metrics
 
