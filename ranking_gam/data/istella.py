@@ -1,8 +1,7 @@
 """
 Istella LETOR dataset loading.
 
-Requires manual download (non-commercial license):
-    https://istella.ai/datasets/letor-dataset/
+Auto-downloads from istella.ai / quickrank mirrors.
 
 Variants:
     Istella-S (sampled): 33K queries, 220 features, ~3.4M docs
@@ -11,27 +10,38 @@ Variants:
 
 All variants: 5-level relevance (0-4), SVMLight format, 220 features.
 
-WARNING: Istella contains extreme feature values (up to DBL_MAX ≈ 1.8e308).
+WARNING: Istella contains extreme feature values (up to DBL_MAX ~ 1.8e308).
 This loader clips values to [-1e6, 1e6] by default before applying log1p.
 """
 
+import glob
 import os
 
-from .svmlight import load_svmlight_dataset
+from .svmlight import download_and_extract, load_svmlight_dataset
 
 ISTELLA_NUM_FEATURES = 220
 
-_DOWNLOAD_URL = "https://istella.ai/datasets/letor-dataset/"
+# Download URLs (same as pytorchltr)
+_ISTELLA_URLS = {
+    "s": "http://library.istella.it/dataset/istella-s-letor.tar.gz",
+    "full": "http://library.istella.it/dataset/istella-letor.tar.gz",
+    "x": "http://quickrank.isti.cnr.it/istella-datasets-mirror/istella-X.tar.gz",
+}
+_ISTELLA_ARCHIVES = {
+    "s": "istella-s-letor.tar.gz",
+    "full": "istella-letor.tar.gz",
+    "x": "istella-X.tar.gz",
+}
 
 
 def load_istella(data_dir="data", variant="s", max_train=6000,
                  max_eval=2000, list_size=40, clip_value=1e6):
     """Load an Istella LETOR dataset variant.
 
-    Requires manual download (non-commercial license) from:
-        https://istella.ai/datasets/letor-dataset/
+    Downloads automatically if not present.
+    Istella-S: ~500MB, Istella: ~1.7GB, Istella-X: ~4.6GB
 
-    Expected directory structure:
+    Expected directory structure (after download):
         data_dir/istella-s/train.txt    (variant="s")
         data_dir/istella-s/test.txt
         data_dir/istella/train.txt      (variant="full")
@@ -78,14 +88,24 @@ def load_istella(data_dir="data", variant="s", max_train=6000,
             break
 
     if train_path is None or not os.path.exists(train_path):
-        raise FileNotFoundError(
-            f"{display_name} not found.\n"
-            f"This dataset requires a non-commercial license. Download from:\n"
-            f"  {_DOWNLOAD_URL}\n"
-            f"Then place files as:\n"
-            f"  {data_dir}/{dir_name}/train.txt\n"
-            f"  {data_dir}/{dir_name}/test.txt"
+        # Auto-download
+        url = _ISTELLA_URLS[variant]
+        archive = _ISTELLA_ARCHIVES[variant]
+        print(f"Downloading {display_name}...")
+        download_and_extract(url, data_dir, archive)
+
+        # Find extracted files
+        matches = glob.glob(
+            f"{data_dir}/**/train.txt", recursive=True
         )
+        if matches:
+            train_path = matches[0]
+            test_path = train_path.replace("train.txt", "test.txt")
+        else:
+            raise FileNotFoundError(
+                f"Downloaded {display_name} but could not find train.txt. "
+                f"Check {data_dir} for extracted files."
+            )
 
     return load_svmlight_dataset(
         train_path, test_path, ISTELLA_NUM_FEATURES,

@@ -8,6 +8,12 @@ This module provides a shared parser so each dataset loader only needs to
 handle download/path logic and call the generic routines.
 """
 
+import glob
+import os
+import tarfile
+import urllib.request
+import zipfile
+
 import numpy as np
 
 
@@ -134,3 +140,39 @@ def load_svmlight_dataset(train_path, test_path, num_features,
     )
     print(f"  Train: {train_X.shape}, Eval: {eval_X.shape}")
     return train_X, train_y, eval_X, eval_y
+
+
+def download_and_extract(url, data_dir, target_filename, extract_dir=None):
+    """Download a file and extract it (zip or tar.gz).
+
+    Args:
+        url: download URL
+        data_dir: directory to save/extract into
+        target_filename: filename for the downloaded archive
+        extract_dir: subdirectory name after extraction (None = data_dir)
+
+    Returns:
+        path to the extracted directory
+    """
+    os.makedirs(data_dir, exist_ok=True)
+    archive_path = os.path.join(data_dir, target_filename)
+
+    if not os.path.exists(archive_path):
+        print(f"  Downloading {target_filename}...")
+        urllib.request.urlretrieve(url, archive_path)
+
+    print(f"  Extracting {target_filename}...")
+    if target_filename.endswith(".zip"):
+        with zipfile.ZipFile(archive_path, "r") as z:
+            z.extractall(data_dir)
+    elif target_filename.endswith((".tar.gz", ".tgz")):
+        with tarfile.open(archive_path, "r:gz") as t:
+            t.extractall(data_dir)
+    else:
+        raise ValueError(f"Unsupported archive format: {target_filename}")
+
+    os.remove(archive_path)
+
+    if extract_dir:
+        return os.path.join(data_dir, extract_dir)
+    return data_dir

@@ -2,6 +2,7 @@
 
 import os
 import tempfile
+from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -249,9 +250,10 @@ class TestDatasetNotFoundErrors:
     """Each loader should raise FileNotFoundError with helpful download info."""
 
     def test_mslr30k_not_found(self, tmp_path):
-        with pytest.raises(FileNotFoundError, match="MSLR-WEB30K"):
-            from ranking_gam.data.mslr import load_mslr30k
-            load_mslr30k(data_dir=str(tmp_path))
+        with patch("ranking_gam.data.mslr.download_and_extract"):
+            with pytest.raises(FileNotFoundError, match="MSLR-WEB30K"):
+                from ranking_gam.data.mslr import load_mslr30k
+                load_mslr30k(data_dir=str(tmp_path))
 
     def test_yahoo_not_found(self, tmp_path):
         with pytest.raises(FileNotFoundError, match="Yahoo LTRC"):
@@ -264,9 +266,10 @@ class TestDatasetNotFoundErrors:
             load_yahoo(set_name="set3")
 
     def test_istella_not_found(self, tmp_path):
-        with pytest.raises(FileNotFoundError, match="Istella"):
-            from ranking_gam.data.istella import load_istella
-            load_istella(data_dir=str(tmp_path))
+        with patch("ranking_gam.data.istella.download_and_extract"):
+            with pytest.raises(FileNotFoundError, match="Istella"):
+                from ranking_gam.data.istella import load_istella
+                load_istella(data_dir=str(tmp_path))
 
     def test_istella_invalid_variant(self):
         with pytest.raises(ValueError, match="variant must be"):

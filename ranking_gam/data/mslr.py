@@ -1,20 +1,21 @@
 """
 MSLR-WEB10K / MSLR-WEB30K data loading.
 
-Downloads MSLR-WEB10K automatically if not found locally.
-MSLR-WEB30K requires manual download from Microsoft Research.
+Both datasets auto-download from Microsoft OneDrive if not found locally.
 
 Both datasets: 136 features, 5-level relevance (0-4), SVMLight format.
 """
 
 import glob
 import os
-import urllib.request
-import zipfile
 
-from .svmlight import load_svmlight_dataset
+from .svmlight import download_and_extract, load_svmlight_dataset
 
 MSLR_NUM_FEATURES = 136
+
+# OneDrive API URLs (same as pytorchltr)
+_MSLR10K_URL = "https://api.onedrive.com/v1.0/shares/s!AtsMfWUz5l8nbOIoJ6Ks0bEMp78/root/content"
+_MSLR30K_URL = "https://api.onedrive.com/v1.0/shares/s!AtsMfWUz5l8nbXGPBlwD1rnFdBY/root/content"
 
 
 def _find_split_files(data_dir, dataset_name):
@@ -33,7 +34,7 @@ def _find_split_files(data_dir, dataset_name):
 def load_mslr(data_dir="data", max_train=6000, max_eval=2000, list_size=40):
     """Load MSLR-WEB10K (Fold1) for learning-to-rank experiments.
 
-    Downloads automatically if not present.
+    Downloads automatically if not present (~160MB).
 
     Args:
         data_dir: directory to store/find the data
@@ -52,16 +53,18 @@ def load_mslr(data_dir="data", max_train=6000, max_eval=2000, list_size=40):
 
     if not train_path:
         print("Downloading MSLR-WEB10K...")
-        zip_path = f"{data_dir}/MSLR-WEB10K.zip"
-        urllib.request.urlretrieve(
-            "https://storage.googleapis.com/personalization-takehome/MSLR-WEB10K.zip",
-            zip_path,
-        )
-        with zipfile.ZipFile(zip_path, "r") as z:
-            z.extractall(data_dir)
-        os.remove(zip_path)
-        train_path = glob.glob(f"{data_dir}/**/train.txt", recursive=True)[0]
-        test_path = train_path.replace("train.txt", "test.txt")
+        download_and_extract(_MSLR10K_URL, data_dir, "MSLR-WEB10K.zip")
+        train_path, test_path = _find_split_files(data_dir, "MSLR-WEB10K")
+        if not train_path:
+            matches = glob.glob(f"{data_dir}/**/train.txt", recursive=True)
+            if matches:
+                train_path = matches[0]
+                test_path = train_path.replace("train.txt", "test.txt")
+            else:
+                raise FileNotFoundError(
+                    "Downloaded MSLR-WEB10K but could not find train.txt. "
+                    f"Check {data_dir} for extracted files."
+                )
 
     return load_svmlight_dataset(
         train_path, test_path, MSLR_NUM_FEATURES,
@@ -74,12 +77,7 @@ def load_mslr30k(data_dir="data", fold=1, max_train=6000, max_eval=2000,
                  list_size=40):
     """Load MSLR-WEB30K for learning-to-rank experiments.
 
-    Requires manual download from:
-        https://www.microsoft.com/en-us/research/project/mslr/
-
-    Expected directory structure:
-        data_dir/MSLR-WEB30K/Fold{fold}/train.txt
-        data_dir/MSLR-WEB30K/Fold{fold}/test.txt
+    Downloads automatically if not present (~1.1GB).
 
     Args:
         data_dir: directory containing the MSLR-WEB30K folder
@@ -97,16 +95,29 @@ def load_mslr30k(data_dir="data", fold=1, max_train=6000, max_eval=2000,
     test_path = os.path.join(fold_dir, "test.txt")
 
     if not os.path.exists(train_path):
-        # Also check flat layout
+        # Check flat layout first
         train_path2, test_path2 = _find_split_files(data_dir, "MSLR-WEB30K")
         if train_path2:
             train_path, test_path = train_path2, test_path2
         else:
-            raise FileNotFoundError(
-                f"MSLR-WEB30K not found at {fold_dir}/.\n"
-                f"Download from: https://www.microsoft.com/en-us/research/project/mslr/\n"
-                f"Extract so that {fold_dir}/train.txt exists."
-            )
+            print("Downloading MSLR-WEB30K (~1.1GB, this may take a while)...")
+            download_and_extract(_MSLR30K_URL, data_dir, "MSLR-WEB30K.zip")
+            # Re-check after download
+            train_path2, test_path2 = _find_split_files(data_dir, "MSLR-WEB30K")
+            if train_path2:
+                train_path, test_path = train_path2, test_path2
+            else:
+                matches = glob.glob(
+                    f"{data_dir}/**/Fold{fold}/train.txt", recursive=True
+                )
+                if matches:
+                    train_path = matches[0]
+                    test_path = train_path.replace("train.txt", "test.txt")
+                else:
+                    raise FileNotFoundError(
+                        "Downloaded MSLR-WEB30K but could not find train.txt. "
+                        f"Check {data_dir} for extracted files."
+                    )
 
     return load_svmlight_dataset(
         train_path, test_path, MSLR_NUM_FEATURES,
