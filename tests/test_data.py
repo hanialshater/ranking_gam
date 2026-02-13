@@ -7,23 +7,22 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-from ranking_gam.data.svmlight import (
-    parse_svmlight_file,
-    prepare_arrays,
-    load_svmlight_dataset,
-)
 from ranking_gam.data import (
-    load_dataset,
-    get_num_features,
-    DATASET_REGISTRY,
     DATASET_NAMES,
+    DATASET_REGISTRY,
+    ISTELLA_NUM_FEATURES,
+    LETOR_NUM_FEATURES,
     MSLR_NUM_FEATURES,
     YAHOO_SET1_NUM_FEATURES,
     YAHOO_SET2_NUM_FEATURES,
-    ISTELLA_NUM_FEATURES,
-    LETOR_NUM_FEATURES,
+    get_num_features,
+    load_dataset,
 )
-
+from ranking_gam.data.svmlight import (
+    load_svmlight_dataset,
+    parse_svmlight_file,
+    prepare_arrays,
+)
 
 # ---- SVMLight format test data ----
 

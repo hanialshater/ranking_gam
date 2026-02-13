@@ -1,10 +1,10 @@
 """Ranking loss functions."""
 
 from .approx_ndcg import ApproxNDCGLoss
-from .pairwise import PairwiseLoss
-from .listwise import ListMLELoss, ListNetLoss
-from .lambda_loss import LambdaLoss
 from .diffsort import DiffSortNDCGLoss, soft_rank
+from .lambda_loss import LambdaLoss
+from .listwise import ListMLELoss, ListNetLoss
+from .pairwise import PairwiseLoss
 
 __all__ = [
     "ApproxNDCGLoss",

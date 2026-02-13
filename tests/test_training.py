@@ -1,12 +1,11 @@
 """Tests for training loops (fast, 1-2 epochs on tiny data)."""
 
-import numpy as np
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
 from ranking_gam.losses import ListNetLoss
-from ranking_gam.models import GAM_Paper, SubmodularRankingGAM, MultiObjectiveRankingGAM
-from ranking_gam.training import train_model, train_diversity_towers, train_multi_objective
+from ranking_gam.models import GAM_Paper, MultiObjectiveRankingGAM, SubmodularRankingGAM
+from ranking_gam.training import train_diversity_towers, train_model, train_multi_objective
 
 
 def _make_loaders(X, y, batch_size=8):

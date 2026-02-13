@@ -2,7 +2,13 @@
 
 import numpy as np
 import torch
-from ranking_gam.models.towers import PaperTower, ConcavePWL, MonotonePWL, LearnableMonotoneTransform
+
+from ranking_gam.models.towers import (
+    ConcavePWL,
+    LearnableMonotoneTransform,
+    MonotonePWL,
+    PaperTower,
+)
 
 
 class TestPaperTower:

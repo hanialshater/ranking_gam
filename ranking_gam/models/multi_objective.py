@@ -17,8 +17,8 @@ Theoretical guarantees:
 import torch
 import torch.nn as nn
 
-from .towers import PaperTower, ConcavePWL, MonotonePWL
 from .groupwise import GroupwiseFeatureComputer
+from .towers import ConcavePWL, MonotonePWL, PaperTower
 
 
 class MultiObjectiveRankingGAM(nn.Module):

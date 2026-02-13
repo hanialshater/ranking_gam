@@ -6,13 +6,13 @@ import torch
 
 lgb = pytest.importorskip("lightgbm", reason="lightgbm not installed")
 
-from ranking_gam.training.boosting import (
+from ranking_gam.losses import ListNetLoss  # noqa: E402
+from ranking_gam.models import GAM_Paper  # noqa: E402
+from ranking_gam.training.boosting import (  # noqa: E402
+    compute_gbdt_residual_feature,
     train_gbdt_baseline,
     train_gbdt_residual_boost,
-    compute_gbdt_residual_feature,
 )
-from ranking_gam.models import GAM_Paper
-from ranking_gam.losses import ListNetLoss
 
 
 class TestGBDTBaseline:

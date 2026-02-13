@@ -1,15 +1,15 @@
 """Tests for all ranking loss functions."""
 
-import torch
 import pytest
+import torch
 
 from ranking_gam.losses import (
     ApproxNDCGLoss,
-    PairwiseLoss,
+    DiffSortNDCGLoss,
+    LambdaLoss,
     ListMLELoss,
     ListNetLoss,
-    LambdaLoss,
-    DiffSortNDCGLoss,
+    PairwiseLoss,
     soft_rank,
 )
 

@@ -17,13 +17,12 @@ References:
     - Tschiatschek et al. 2014: learning submodular functions from data
 """
 
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .towers import PaperTower, ConcavePWL, LearnableMonotoneTransform
 from .groupwise import GroupwiseFeatureComputer
+from .towers import ConcavePWL, LearnableMonotoneTransform, PaperTower
 
 
 class SubmodularRankingGAM(nn.Module):

@@ -52,7 +52,6 @@ def _train_gbdt_regression(train_X, train_y, eval_X, eval_y, **lgbm_kwargs):
         )
 
     B_tr = train_X.shape[0]
-    D = train_X.shape[-1]
 
     X_train_list = []
     y_train_list = []
@@ -284,8 +283,8 @@ def train_gbdt_residual_boost(
             "gbdt_residual_ndcg": GBDT-on-residuals NDCG (ranking by residual prediction)
             "boosted_ndcg": final GAM+magic-curve NDCG
     """
-    from .trainer import train_model
     from ..models import GAM_Paper
+    from .trainer import train_model
 
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -335,7 +334,6 @@ def train_gbdt_residual_boost(
     # Keep the D trained towers frozen, only train the new GBDT tower (D+1).
     print("\n  Stage 3: Training magic curve tower (freeze existing D towers)...")
     train_X_boosted = compute_gbdt_residual_feature(gbdt_model, train_X)
-    eval_X_boosted = compute_gbdt_residual_feature(gbdt_model, eval_X)
 
     # Infer model config from original
     tower_hidden = []

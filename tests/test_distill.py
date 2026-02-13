@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from ranking_gam.distill import greedy_knot_selection, distill_to_pwl, pwl_predict
+from ranking_gam.distill import distill_to_pwl, greedy_knot_selection, pwl_predict
 from ranking_gam.models import GAM_Paper
 
 

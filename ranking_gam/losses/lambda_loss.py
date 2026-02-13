@@ -144,9 +144,10 @@ class LambdaLoss(nn.Module):
         L = G.shape[1]
         pos_idxs = torch.arange(1, L + 1, device=G.device)
         delta_idxs = torch.abs(pos_idxs[:, None] - pos_idxs[None, :])
+        safe_delta_idxs = delta_idxs.clamp(min=1)
         deltas = torch.abs(
-            torch.pow(torch.abs(D[0, delta_idxs - 1]), -1.0)
-            - torch.pow(torch.abs(D[0, delta_idxs]), -1.0)
+            torch.pow(torch.abs(D[0, safe_delta_idxs - 1]), -1.0)
+            - torch.pow(torch.abs(D[0, safe_delta_idxs]), -1.0)
         )
         deltas.diagonal().zero_()
         return deltas[None, :, :] * torch.abs(G[:, :, None] - G[:, None, :])
