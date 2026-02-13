@@ -242,7 +242,37 @@ def demo_gam(data, epochs, K, transforms=True, residual=True, lr_schedule="cosin
     plt.close(fig)
     print(f"  Saved: response_curves_{model_name.lower()}.png")
 
-    return {f"{model_name}_{loss}": ndcg}
+    # --- Distillation: neural towers -> piecewise-linear ---
+    print(f"\n  Distilling {model_name} to piecewise-linear (K=5 knots)...")
+    pwl = rg.distill_to_pwl(model, num_knots=5, train_X=data["train_X"])
+    pwl_ndcg = rg.evaluate_pwl(pwl, data["eval_X"], data["eval_y"], k=K)
+    gap = ndcg - pwl_ndcg
+    print(f"  Neural {model_name}: NDCG@{K} = {ndcg:.4f}")
+    print(f"  PWL distilled:      NDCG@{K} = {pwl_ndcg:.4f}  (gap: {gap:+.4f})")
+
+    # Plot distilled PWL response curves
+    fig_pwl, axes = plt.subplots(3, 5, figsize=(20, 10))
+    axes = axes.flatten()
+    # Sort by variance of tower output to show most important features
+    importances = []
+    for p in pwl["main_effects"]:
+        y_range = max(p["y"]) - min(p["y"]) if p["y"] else 0
+        importances.append((p["feature"], y_range))
+    importances.sort(key=lambda x: -x[1])
+    for ax_idx, (feat_idx, _) in enumerate(importances[:15]):
+        p = pwl["main_effects"][feat_idx]
+        ax = axes[ax_idx]
+        ax.plot(p["x"], p["y"], "o-", color="#e74c3c", linewidth=2, markersize=4)
+        fname = MSLR_FEATURE_NAMES[feat_idx] if feat_idx < len(MSLR_FEATURE_NAMES) else f"f{feat_idx}"
+        ax.set_title(f"{fname} (K={len(p['x'])})", fontsize=9)
+        ax.grid(True, alpha=0.3)
+    fig_pwl.suptitle(f"Distilled PWL Response Curves (NDCG@{K}={pwl_ndcg:.4f})", fontsize=14)
+    fig_pwl.tight_layout()
+    fig_pwl.savefig(f"pwl_curves_{model_name.lower()}.png", dpi=150, bbox_inches="tight")
+    plt.close(fig_pwl)
+    print(f"  Saved: pwl_curves_{model_name.lower()}.png")
+
+    return {f"{model_name}_{loss}": ndcg, f"{model_name}_PWL": pwl_ndcg}
 
 
 def demo_submodular(data, epochs, K, queries_per_epoch,
