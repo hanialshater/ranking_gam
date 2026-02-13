@@ -95,6 +95,27 @@ class SubmodularRankingGAM(nn.Module):
 
         self.feature_computer = GroupwiseFeatureComputer(groupwise_specs)
 
+        self.global_bias = nn.Parameter(torch.zeros(1))
+
+    def get_main_effect(self, feature_idx, x_values):
+        """Get tower response for a single item feature (for distillation/viz).
+
+        Args:
+            feature_idx: index of the item feature tower
+            x_values: 1D numpy array of input values
+
+        Returns:
+            1D numpy array of tower outputs
+        """
+        self.eval()
+        x_t = torch.tensor(x_values, dtype=torch.float32).reshape(-1, 1)
+        x_t = x_t.to(next(self.parameters()).device)
+        with torch.no_grad():
+            feat = x_t
+            if self.feature_transforms is not None:
+                feat = self.feature_transforms[feature_idx](feat)
+            return self.item_towers[feature_idx](feat).cpu().numpy().flatten()
+
     def init_transforms_from_data(self, X):
         """Initialize feature transforms from training data percentiles.
 
@@ -125,7 +146,7 @@ class SubmodularRankingGAM(nn.Module):
             sub_scores.append(self.item_towers[j](feat))
 
         total = torch.stack(sub_scores, dim=-1).sum(dim=-1).squeeze(-1)
-        return total.view(B, L)
+        return total.view(B, L) + self.global_bias
 
     def diversity_scores(self, groupwise_features):
         """Score groupwise features through concave PWL towers.

@@ -108,21 +108,75 @@ def greedy_knot_selection(x_data, y_data, num_knots, max_refine=50):
     return x_knots, y_knots
 
 
+def _check_distillable(model):
+    """Validate that a model supports distillation to PWL.
+
+    Supported models: GAM_Paper, GA2M_Paper, ContextGAM, SubmodularRankingGAM.
+    Not supported: MultiObjectiveRankingGAM (multiple objective towers, no single
+    set of main effects), ContextPresentGA2M (use distill_context_model instead).
+
+    Raises:
+        TypeError: if the model lacks required attributes.
+    """
+    model_cls = type(model).__name__
+    missing = []
+    for attr in ("num_features", "get_main_effect", "global_bias"):
+        if not hasattr(model, attr):
+            missing.append(attr)
+    if missing:
+        raise TypeError(
+            f"{model_cls} does not support distill_to_pwl "
+            f"(missing: {', '.join(missing)}). "
+            f"Supported models: GAM_Paper, GA2M_Paper, ContextGAM, "
+            f"SubmodularRankingGAM."
+        )
+
+
 def distill_to_pwl(model, num_knots=5, grid_size=30, train_X=None):
     """
-    Distill GA2M/GAM to PWL with Algorithm 1.
+    Distill GAM/GA2M/ContextGAM to PWL with Algorithm 1.
 
     Paper Section 5.1: "a small K (e.g. around 3 to 5) is usually sufficient"
 
+    Supported models:
+        - GAM_Paper: full distillation
+        - GA2M_Paper: main effects + interaction grids
+        - ContextGAM: tower shapes only (context weights are dropped;
+          use the neural context_net at serving time alongside PWL towers)
+        - SubmodularRankingGAM: item towers only (diversity towers are
+          already piecewise-linear)
+
+    Not supported:
+        - MultiObjectiveRankingGAM: multiple objective tower sets, no
+          single set of main effects to distill
+        - ContextPresentGA2M: use distill_context_model() instead
+
     Args:
-        model: trained GAM/GA2M model with get_main_effect()
+        model: trained model with get_main_effect(), num_features, global_bias
         num_knots: knots per feature
         grid_size: grid resolution for 2D interactions
         train_X: [B, L, D] training data for percentile sampling
 
     Returns:
         dict with 'main_effects', 'interactions', 'bias'
+
+    Raises:
+        TypeError: if the model does not support distillation
     """
+    _check_distillable(model)
+
+    model_cls = type(model).__name__
+    if model_cls == "ContextGAM":
+        import warnings
+        warnings.warn(
+            "Distilling ContextGAM: tower shapes are distilled to PWL but "
+            "context weights (w_j(x)) are dropped. The distilled model scores "
+            "as sum(f_j(x_j)) instead of sum(w_j(x)*f_j(x_j)). For full "
+            "ContextGAM serving, keep the context_net (~14K params) alongside "
+            "the PWL towers.",
+            stacklevel=2,
+        )
+
     num_features = model.num_features
 
     main_pwl = []

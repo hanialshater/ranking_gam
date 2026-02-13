@@ -243,12 +243,21 @@ def demo_gam(data, epochs, K, transforms=True, residual=True, lr_schedule="cosin
     print(f"  Saved: response_curves_{model_name.lower()}.png")
 
     # --- Distillation: neural towers -> piecewise-linear ---
-    print(f"\n  Distilling {model_name} to piecewise-linear (K=5 knots)...")
-    pwl = rg.distill_to_pwl(model, num_knots=5, train_X=data["train_X"])
+    if context:
+        print(f"\n  Distilling {model_name} towers to PWL (K=5 knots)...")
+        print("  Note: context weights (w_j) are NOT distilled -- keep context_net for serving")
+    else:
+        print(f"\n  Distilling {model_name} to piecewise-linear (K=5 knots)...")
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")  # suppress ContextGAM warning in demo (we print our own)
+        pwl = rg.distill_to_pwl(model, num_knots=5, train_X=data["train_X"])
     pwl_ndcg = rg.evaluate_pwl(pwl, data["eval_X"], data["eval_y"], k=K)
     gap = ndcg - pwl_ndcg
     print(f"  Neural {model_name}: NDCG@{K} = {ndcg:.4f}")
     print(f"  PWL distilled:      NDCG@{K} = {pwl_ndcg:.4f}  (gap: {gap:+.4f})")
+    if context:
+        print(f"  (Larger gap expected -- context weights dropped in PWL-only eval)")
 
     # Plot distilled PWL response curves
     fig_pwl, axes = plt.subplots(3, 5, figsize=(20, 10))
