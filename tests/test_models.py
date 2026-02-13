@@ -4,11 +4,13 @@ import numpy as np
 import torch
 
 from ranking_gam.models import (
+    ContextGAM,
     ContextPresentGA2M,
     GA2M_Paper,
     GAM_Paper,
     MultiObjectiveRankingGAM,
     SubmodularRankingGAM,
+    TransformerRanker,
 )
 
 
@@ -347,3 +349,112 @@ class TestMultiObjectiveRankingGAM:
         assert len(expl) == len(order_list)
         assert "objectives" in expl[0]
         assert "relevance" in expl[0]["objectives"]
+
+
+class TestTransformerRanker:
+    def test_forward_shape(self, synthetic_tensors):
+        X, _ = synthetic_tensors
+        B, L, D = X.shape
+        model = TransformerRanker(num_features=D, d_model=16, nhead=2, num_layers=1, dim_feedforward=32)
+        out = model(X)
+        assert out.shape == (B, L)
+
+    def test_gradient_flows(self, synthetic_tensors):
+        X, _ = synthetic_tensors
+        model = TransformerRanker(num_features=X.shape[-1], d_model=16, nhead=2, num_layers=1)
+        out = model(X)
+        out.sum().backward()
+        for name, p in model.named_parameters():
+            assert p.grad is not None, f"No gradient for {name}"
+
+    def test_cross_document_interaction(self, synthetic_tensors):
+        """Transformer output for one doc should depend on other docs in the list."""
+        X, _ = synthetic_tensors
+        D = X.shape[-1]
+        model = TransformerRanker(num_features=D, d_model=16, nhead=2, num_layers=1)
+        model.eval()
+        with torch.no_grad():
+            scores_full = model(X[:1])
+            # Change a different document and see if it affects score of doc 0
+            X_mod = X[:1].clone()
+            X_mod[0, 1, :] += 10.0
+            scores_mod = model(X_mod)
+        # Score of doc 0 should differ because transformer attends across docs
+        assert not torch.allclose(scores_full[0, 0:1], scores_mod[0, 0:1], atol=1e-5), \
+            "Transformer should have cross-document interactions"
+
+    def test_eval_deterministic(self, synthetic_tensors):
+        X, _ = synthetic_tensors
+        model = TransformerRanker(num_features=X.shape[-1], d_model=16, nhead=2, num_layers=1)
+        model.eval()
+        with torch.no_grad():
+            out1 = model(X)
+            out2 = model(X)
+        assert torch.allclose(out1, out2)
+
+
+class TestContextGAM:
+    def _make_model(self, D=8):
+        return ContextGAM(
+            num_features=D, hidden_dims=[8, 4], context_hidden=[16, 8],
+            activation="relu",
+        )
+
+    def test_forward_shape(self, synthetic_tensors):
+        X, _ = synthetic_tensors
+        model = self._make_model(X.shape[-1])
+        out = model(X)
+        assert out.shape == (X.shape[0], X.shape[1])
+
+    def test_gradient_flows(self, synthetic_tensors):
+        X, _ = synthetic_tensors
+        model = self._make_model(X.shape[-1])
+        out = model(X)
+        out.sum().backward()
+        for name, p in model.named_parameters():
+            assert p.grad is not None, f"No gradient for {name}"
+
+    def test_get_main_effect(self, synthetic_tensors):
+        X, _ = synthetic_tensors
+        model = self._make_model(X.shape[-1])
+        x_vals = np.linspace(-2, 2, 50).astype(np.float32)
+        effect = model.get_main_effect(0, x_vals)
+        assert effect.shape == (50,)
+
+    def test_get_context_weights(self, synthetic_tensors):
+        X, _ = synthetic_tensors
+        D = X.shape[-1]
+        model = self._make_model(D)
+        x_single = X[0, 0].numpy()
+        weights = model.get_context_weights(x_single)
+        assert weights.shape == (D,)
+        assert abs(weights.sum() - 1.0) < 1e-5, "Context weights must sum to 1"
+        assert (weights >= 0).all(), "Context weights must be non-negative (softmax)"
+
+    def test_explain(self, synthetic_tensors):
+        X, _ = synthetic_tensors
+        D = X.shape[-1]
+        model = self._make_model(D)
+        x_single = X[0, 0].numpy()
+        expl = model.explain(x_single)
+        assert "tower_outputs" in expl
+        assert "context_weights" in expl
+        assert "contributions" in expl
+        assert "score" in expl
+        assert expl["tower_outputs"].shape == (D,)
+        assert expl["context_weights"].shape == (D,)
+        assert expl["contributions"].shape == (D,)
+        # Score should equal sum of contributions + bias
+        assert abs(expl["score"] - (expl["contributions"].sum() + model.global_bias.item())) < 1e-4
+
+    def test_with_feature_transforms(self, synthetic_data):
+        X, _ = synthetic_data
+        D = X.shape[-1]
+        model = ContextGAM(
+            num_features=D, hidden_dims=[8, 4], context_hidden=[16, 8],
+            feature_transforms=True, num_transform_knots=10,
+        )
+        model.init_transforms_from_data(X)
+        X_t = torch.from_numpy(X)
+        out = model(X_t)
+        assert out.shape == (X.shape[0], X.shape[1])

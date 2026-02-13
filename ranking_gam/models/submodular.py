@@ -210,11 +210,10 @@ class SubmodularRankingGAM(nn.Module):
                 marginal = base_cand + div_cand
 
                 best_local = marginal.argmax().item()
-                best_global = remaining[best_local]
+                best_global = remaining.pop(best_local)
 
                 selected.append(best_global)
                 scores_at_sel.append(marginal[best_local].item())
-                remaining.remove(best_global)
 
             all_orders.append(selected)
             all_scores.append(scores_at_sel)
