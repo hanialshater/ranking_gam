@@ -53,8 +53,10 @@ FINN_INTERACTION_PAIRS = [
     (1, 6),  # category x same_cat_before
 ]
 
-# HuggingFace dataset repo (most reliable)
-_HF_REPO = "simeneide/recsys_slates_dataset"
+# GitHub raw URLs for LFS-tracked files (most reliable)
+_GITHUB_RAW_BASE = (
+    "https://github.com/finn-no/recsys_slates_dataset/raw/master/data"
+)
 
 # Google Drive file IDs from official repo (fallback)
 _GDRIVE_IDS = {
@@ -67,18 +69,15 @@ _GDRIVE_IDS = {
 _FINN_FILES = ["data.npz", "ind2val.json", "itemattr.npz"]
 
 
-def _download_from_huggingface(data_dir):
-    """Download FINN data files from HuggingFace Hub.
+def _download_from_github(data_dir):
+    """Download FINN data files from GitHub (finn-no/recsys_slates_dataset).
 
-    Repo: https://huggingface.co/datasets/simeneide/recsys_slates_dataset
+    Files are stored via Git-LFS; GitHub serves actual content at raw URLs.
 
     Returns:
         True if all files downloaded successfully, False otherwise.
     """
-    try:
-        from huggingface_hub import hf_hub_download
-    except ImportError:
-        return False
+    import urllib.request
 
     os.makedirs(data_dir, exist_ok=True)
 
@@ -86,20 +85,19 @@ def _download_from_huggingface(data_dir):
         fpath = os.path.join(data_dir, fname)
         if os.path.exists(fpath):
             continue
-        print(f"  Downloading {fname} from HuggingFace...")
+        url = f"{_GITHUB_RAW_BASE}/{fname}"
+        print(f"  Downloading {fname} from GitHub...")
         try:
-            downloaded = hf_hub_download(
-                repo_id=_HF_REPO,
-                filename=fname,
-                repo_type="dataset",
-                local_dir=data_dir,
-            )
-            # hf_hub_download may place file in a subdir; copy if needed
-            if downloaded != fpath and os.path.exists(downloaded):
-                import shutil
-                shutil.copy2(downloaded, fpath)
+            urllib.request.urlretrieve(url, fpath)
+            if os.path.getsize(fpath) < 100:
+                # LFS pointer or error page, not actual data
+                os.remove(fpath)
+                print(f"  GitHub download returned invalid data for {fname}")
+                return False
         except Exception as e:
-            print(f"  HuggingFace download failed for {fname}: {e}")
+            print(f"  GitHub download failed for {fname}: {e}")
+            if os.path.exists(fpath):
+                os.remove(fpath)
             return False
 
     return all(os.path.exists(os.path.join(data_dir, f)) for f in _FINN_FILES)
@@ -146,30 +144,32 @@ def _download_from_gdrive(data_dir, use_int32=True):
 def _download_finn(data_dir, use_int32=True):
     """Download FINN slate data files.
 
-    Tries HuggingFace Hub first (most reliable), falls back to Google Drive.
+    Tries GitHub raw URLs first (Git-LFS served), falls back to Google Drive.
 
     Args:
         data_dir: directory to save files
         use_int32: if True, download int32 data.npz from Google Drive
-            (HuggingFace hosts the default version)
+            (GitHub hosts the default version)
     """
-    # Try HuggingFace first
-    if _download_from_huggingface(data_dir):
+    # Try GitHub first (raw URLs serve LFS content)
+    if _download_from_github(data_dir):
         return True
 
-    print("  HuggingFace unavailable, trying Google Drive...")
+    print("  GitHub unavailable, trying Google Drive...")
     if _download_from_gdrive(data_dir, use_int32=use_int32):
         return True
 
     raise RuntimeError(
-        "Failed to download FINN dataset from both HuggingFace and Google Drive.\n"
+        "Failed to download FINN dataset from both GitHub and Google Drive.\n"
         "Manual options:\n"
-        "  1. pip install huggingface_hub && huggingface-cli download "
-        f"--repo-type dataset {_HF_REPO} --local-dir {data_dir}\n"
+        "  1. pip install recsys-slates-dataset && python -c "
+        "\"from recsys_slates_dataset import data_helper; "
+        f"data_helper.download_data_files('{data_dir}')\"\n"
         "  2. Download data.npz, itemattr.npz, ind2val.json from:\n"
-        f"     https://huggingface.co/datasets/{_HF_REPO}\n"
+        "     https://github.com/finn-no/recsys_slates_dataset/tree/master/data\n"
         f"     and place them in {data_dir}/\n"
-        "  3. pip install gdown && pip install recsys-slates-dataset"
+        "  3. git clone https://github.com/finn-no/recsys_slates_dataset.git && "
+        f"cp recsys_slates_dataset/data/*.npz recsys_slates_dataset/data/*.json {data_dir}/"
     )
 
 

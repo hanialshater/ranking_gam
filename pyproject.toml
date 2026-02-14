@@ -18,7 +18,7 @@ dependencies = [
 
 [project.optional-dependencies]
 data = ["lightgbm>=4.0", "scikit-learn>=1.0"]
-finn = ["huggingface_hub>=0.14", "gdown>=4.6"]
+finn = ["gdown>=4.6"]
 viz = ["matplotlib>=3.7"]
 all = ["ranking-gam[data,finn,viz]"]
 dev = [
