@@ -424,6 +424,150 @@ def plot_pareto_front(scenario_metrics, x_metric="ndcg", y_metric="ild",
     return fig
 
 
+def plot_interaction_heatmap(
+    model, pair_idx, x1_range=None, x2_range=None, n_points=50,
+    feature_names=None, figsize=(6, 5), cmap="RdBu_r",
+):
+    """
+    Plot 2D heatmap of a GA2M interaction effect f_{jk}(x_j, x_k).
+
+    Evaluates the interaction tower on a grid and renders as a heatmap,
+    showing how the pairwise effect varies across both features.
+
+    Args:
+        model: trained GA2M_Paper or similar with get_interaction_effect()
+        pair_idx: index into model.interaction_pairs
+        x1_range: (min, max) for feature j, or None for (0, 1)
+        x2_range: (min, max) for feature k, or None for (0, 1)
+        n_points: grid resolution per axis
+        feature_names: list of str names (indexed by feature index)
+        figsize: figure size
+        cmap: matplotlib colormap name
+
+    Returns:
+        matplotlib figure
+    """
+    import matplotlib.pyplot as plt
+
+    if x1_range is None:
+        x1_range = (0.0, 1.0)
+    if x2_range is None:
+        x2_range = (0.0, 1.0)
+
+    f1_idx, f2_idx = model.interaction_pairs[pair_idx]
+
+    x1 = np.linspace(x1_range[0], x1_range[1], n_points)
+    x2 = np.linspace(x2_range[0], x2_range[1], n_points)
+    x1_grid, x2_grid = np.meshgrid(x1, x2)
+
+    x1_flat = x1_grid.flatten().astype(np.float32)
+    x2_flat = x2_grid.flatten().astype(np.float32)
+
+    z_flat = model.get_interaction_effect(pair_idx, x1_flat, x2_flat)
+    z_grid = z_flat.reshape(n_points, n_points)
+
+    fig, ax = plt.subplots(figsize=figsize)
+    im = ax.imshow(
+        z_grid, origin="lower", aspect="auto",
+        extent=[x1_range[0], x1_range[1], x2_range[0], x2_range[1]],
+        cmap=cmap, interpolation="bilinear",
+    )
+    fig.colorbar(im, ax=ax, label="Interaction effect")
+
+    f1_name = feature_names[f1_idx] if feature_names and f1_idx < len(feature_names) else f"feature_{f1_idx}"
+    f2_name = feature_names[f2_idx] if feature_names and f2_idx < len(feature_names) else f"feature_{f2_idx}"
+
+    ax.set_xlabel(f1_name, fontsize=11)
+    ax.set_ylabel(f2_name, fontsize=11)
+    ax.set_title(f"Interaction: {f1_name} x {f2_name}", fontsize=13, fontweight="bold")
+
+    fig.tight_layout()
+    return fig
+
+
+def plot_interaction_grid(
+    model, feature_names=None, x_ranges=None, n_points=40,
+    figsize_per=(4, 3.5), cmap="RdBu_r",
+):
+    """
+    Plot heatmaps for all interaction pairs in a GA2M model.
+
+    Args:
+        model: trained GA2M_Paper with interaction_pairs
+        feature_names: list of str names
+        x_ranges: dict {feature_idx: (min, max)} or None for (0, 1)
+        n_points: grid resolution per axis
+        figsize_per: (width, height) per subplot
+        cmap: matplotlib colormap
+
+    Returns:
+        matplotlib figure
+    """
+    import matplotlib.pyplot as plt
+
+    n_pairs = len(model.interaction_pairs)
+    if n_pairs == 0:
+        fig, ax = plt.subplots(figsize=(4, 3))
+        ax.text(0.5, 0.5, "No interaction pairs", ha="center", va="center")
+        return fig
+
+    n_cols = min(3, n_pairs)
+    n_rows = (n_pairs + n_cols - 1) // n_cols
+    fig, axes = plt.subplots(
+        n_rows, n_cols,
+        figsize=(figsize_per[0] * n_cols, figsize_per[1] * n_rows),
+    )
+    if n_rows == 1 and n_cols == 1:
+        axes = np.array([[axes]])
+    elif n_rows == 1:
+        axes = axes.reshape(1, -1)
+    elif n_cols == 1:
+        axes = axes.reshape(-1, 1)
+
+    if x_ranges is None:
+        x_ranges = {}
+
+    for idx in range(n_pairs):
+        row, col = divmod(idx, n_cols)
+        ax = axes[row, col]
+
+        f1_idx, f2_idx = model.interaction_pairs[idx]
+        x1_range = x_ranges.get(f1_idx, (0.0, 1.0))
+        x2_range = x_ranges.get(f2_idx, (0.0, 1.0))
+
+        x1 = np.linspace(x1_range[0], x1_range[1], n_points)
+        x2 = np.linspace(x2_range[0], x2_range[1], n_points)
+        x1_grid, x2_grid = np.meshgrid(x1, x2)
+
+        x1_flat = x1_grid.flatten().astype(np.float32)
+        x2_flat = x2_grid.flatten().astype(np.float32)
+
+        z_flat = model.get_interaction_effect(idx, x1_flat, x2_flat)
+        z_grid = z_flat.reshape(n_points, n_points)
+
+        im = ax.imshow(
+            z_grid, origin="lower", aspect="auto",
+            extent=[x1_range[0], x1_range[1], x2_range[0], x2_range[1]],
+            cmap=cmap, interpolation="bilinear",
+        )
+        fig.colorbar(im, ax=ax, shrink=0.8)
+
+        f1_name = feature_names[f1_idx] if feature_names and f1_idx < len(feature_names) else f"f{f1_idx}"
+        f2_name = feature_names[f2_idx] if feature_names and f2_idx < len(feature_names) else f"f{f2_idx}"
+        ax.set_xlabel(f1_name, fontsize=9)
+        ax.set_ylabel(f2_name, fontsize=9)
+        ax.set_title(f"{f1_name} x {f2_name}", fontsize=10, fontweight="bold")
+        ax.tick_params(labelsize=7)
+
+    for idx in range(n_pairs, n_rows * n_cols):
+        row, col = divmod(idx, n_cols)
+        axes[row, col].set_visible(False)
+
+    fig.suptitle("GA2M Interaction Effects", fontsize=13, fontweight="bold")
+    fig.tight_layout()
+    return fig
+
+
 def plot_objective_tradeoffs(scenario_metrics, objectives=None, figsize=(10, 5)):
     """Plot grouped bar chart of metrics across scenarios.
 
