@@ -53,7 +53,10 @@ FINN_INTERACTION_PAIRS = [
     (1, 6),  # category x same_cat_before
 ]
 
-# Google Drive file IDs from official repo: finn-no/recsys_slates_dataset
+# HuggingFace dataset repo (most reliable)
+_HF_REPO = "simeneide/recsys_slates_dataset"
+
+# Google Drive file IDs from official repo (fallback)
 _GDRIVE_IDS = {
     "data_int32": "1XHqyk01qi9qnvBTfWWwqgDzrdjv1eBVV",
     "data_full": "1VXKXIvPCJ7z4BCa4G_5-Q2XMAD7nXOc7",
@@ -61,25 +64,56 @@ _GDRIVE_IDS = {
     "itemattr": "1rKKyMQZqWp8vQ-Pl1SeHrQxzc5dXldnR",
 }
 
+_FINN_FILES = ["data.npz", "ind2val.json", "itemattr.npz"]
 
-def _download_finn(data_dir, use_int32=True):
-    """Download FINN slate data files using gdown.
 
-    Uses ``fuzzy=True`` to work around Google Drive rate-limiting.
+def _download_from_huggingface(data_dir):
+    """Download FINN data files from HuggingFace Hub.
+
+    Repo: https://huggingface.co/datasets/simeneide/recsys_slates_dataset
+
+    Returns:
+        True if all files downloaded successfully, False otherwise.
+    """
+    try:
+        from huggingface_hub import hf_hub_download
+    except ImportError:
+        return False
+
+    os.makedirs(data_dir, exist_ok=True)
+
+    for fname in _FINN_FILES:
+        fpath = os.path.join(data_dir, fname)
+        if os.path.exists(fpath):
+            continue
+        print(f"  Downloading {fname} from HuggingFace...")
+        try:
+            downloaded = hf_hub_download(
+                repo_id=_HF_REPO,
+                filename=fname,
+                repo_type="dataset",
+                local_dir=data_dir,
+            )
+            # hf_hub_download may place file in a subdir; copy if needed
+            if downloaded != fpath and os.path.exists(downloaded):
+                import shutil
+                shutil.copy2(downloaded, fpath)
+        except Exception as e:
+            print(f"  HuggingFace download failed for {fname}: {e}")
+            return False
+
+    return all(os.path.exists(os.path.join(data_dir, f)) for f in _FINN_FILES)
+
+
+def _download_from_gdrive(data_dir, use_int32=True):
+    """Download FINN data files from Google Drive (fallback).
+
     File IDs from https://github.com/finn-no/recsys_slates_dataset
-
-    Args:
-        data_dir: directory to save files
-        use_int32: if True, download the int32 version of data.npz which
-            uses less memory (recommended for most systems)
     """
     try:
         import gdown
     except ImportError:
-        raise ImportError(
-            "gdown is required to download the FINN dataset. "
-            "Install with: pip install gdown"
-        )
+        return False
 
     os.makedirs(data_dir, exist_ok=True)
 
@@ -96,28 +130,47 @@ def _download_finn(data_dir, use_int32=True):
             continue
 
         url = f"https://drive.google.com/uc?id={gdrive_id}"
-        print(f"  Downloading {fname}...")
+        print(f"  Downloading {fname} from Google Drive...")
 
-        # Try with fuzzy=True first (handles rate-limited / confirmation pages)
         try:
             gdown.download(url, fpath, quiet=False, fuzzy=True)
         except TypeError:
-            # Older gdown without fuzzy parameter
             gdown.download(url, fpath, quiet=False)
+        except Exception as e:
+            print(f"  Google Drive download failed for {fname}: {e}")
+            return False
 
-        if not os.path.exists(fpath):
-            raise RuntimeError(
-                f"Failed to download {fname}. Google Drive may be rate-limiting.\n"
-                f"Manual download:\n"
-                f"  1. Open https://drive.google.com/uc?id={gdrive_id} in a browser\n"
-                f"  2. Save the file as {fpath}\n"
-                f"Or use the official dataset helper:\n"
-                f"  pip install recsys-slates-dataset\n"
-                f"  python -c \"from recsys_slates_dataset.data_helper import "
-                f"download_data_files; download_data_files('{data_dir}')\""
-            )
+    return all(os.path.exists(os.path.join(data_dir, f)) for f in _FINN_FILES)
 
-    return True
+
+def _download_finn(data_dir, use_int32=True):
+    """Download FINN slate data files.
+
+    Tries HuggingFace Hub first (most reliable), falls back to Google Drive.
+
+    Args:
+        data_dir: directory to save files
+        use_int32: if True, download int32 data.npz from Google Drive
+            (HuggingFace hosts the default version)
+    """
+    # Try HuggingFace first
+    if _download_from_huggingface(data_dir):
+        return True
+
+    print("  HuggingFace unavailable, trying Google Drive...")
+    if _download_from_gdrive(data_dir, use_int32=use_int32):
+        return True
+
+    raise RuntimeError(
+        "Failed to download FINN dataset from both HuggingFace and Google Drive.\n"
+        "Manual options:\n"
+        "  1. pip install huggingface_hub && huggingface-cli download "
+        f"--repo-type dataset {_HF_REPO} --local-dir {data_dir}\n"
+        "  2. Download data.npz, itemattr.npz, ind2val.json from:\n"
+        f"     https://huggingface.co/datasets/{_HF_REPO}\n"
+        f"     and place them in {data_dir}/\n"
+        "  3. pip install gdown && pip install recsys-slates-dataset"
+    )
 
 
 def _compute_item_stats(slates, clicks, item_categories, n_items):
