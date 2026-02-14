@@ -68,9 +68,13 @@ def __getattr__(name):
         "load_istella": (".data", "load_istella"),
         "load_mq2007": (".data", "load_mq2007"),
         "load_mq2008": (".data", "load_mq2008"),
+        "load_finn": (".data", "load_finn"),
         "load_dataset": (".data", "load_dataset"),
         "get_num_features": (".data", "get_num_features"),
         "DATASET_NAMES": (".data", "DATASET_NAMES"),
+        "FINN_NUM_FEATURES": (".data", "FINN_NUM_FEATURES"),
+        "FINN_FEATURE_NAMES": (".data", "FINN_FEATURE_NAMES"),
+        "FINN_INTERACTION_PAIRS": (".data", "FINN_INTERACTION_PAIRS"),
         # Interactions
         "select_interactions_correlation": (".interactions", "select_interactions_correlation"),
         # Item boosting
@@ -143,9 +147,13 @@ __all__ = [
     "load_istella",
     "load_mq2007",
     "load_mq2008",
+    "load_finn",
     "load_dataset",
     "get_num_features",
     "DATASET_NAMES",
+    "FINN_NUM_FEATURES",
+    "FINN_FEATURE_NAMES",
+    "FINN_INTERACTION_PAIRS",
     # Interactions
     "select_interactions_correlation",
     # Item boosting

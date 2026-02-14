@@ -2,6 +2,8 @@
 
 from .plots import (
     plot_diversity_curves,
+    plot_interaction_grid,
+    plot_interaction_heatmap,
     plot_objective_tradeoffs,
     plot_pareto_front,
     plot_response_curves,
@@ -16,4 +18,6 @@ __all__ = [
     "print_diversity_comparison",
     "plot_pareto_front",
     "plot_objective_tradeoffs",
+    "plot_interaction_heatmap",
+    "plot_interaction_grid",
 ]

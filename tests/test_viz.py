@@ -6,9 +6,11 @@ matplotlib.use("Agg")
 
 import numpy as np  # noqa: E402
 
-from ranking_gam.models import GAM_Paper, SubmodularRankingGAM  # noqa: E402
-from ranking_gam.viz.plots import (
+from ranking_gam.models import GA2M_Paper, GAM_Paper, SubmodularRankingGAM  # noqa: E402
+from ranking_gam.viz.plots import (  # noqa: E402
     plot_diversity_curves,
+    plot_interaction_grid,
+    plot_interaction_heatmap,
     plot_objective_tradeoffs,
     plot_pareto_front,
     plot_response_curves,
@@ -138,4 +140,76 @@ class TestPlotObjectiveTradeoffs:
             "B": {"x": 0.8, "y": 0.7},
         }
         fig = plot_objective_tradeoffs(scenarios, objectives=["x", "y"])
+        assert fig is not None
+
+
+class TestPlotInteractionHeatmap:
+    def test_basic(self):
+        model = GA2M_Paper(
+            num_features=4, interaction_pairs=[(0, 1), (2, 3)],
+            hidden_dims=[8, 4], interaction_hidden=[8, 4],
+        )
+        fig = plot_interaction_heatmap(model, pair_idx=0)
+        assert fig is not None
+
+    def test_with_feature_names(self):
+        model = GA2M_Paper(
+            num_features=4, interaction_pairs=[(0, 1)],
+            hidden_dims=[8, 4], interaction_hidden=[8, 4],
+        )
+        fig = plot_interaction_heatmap(
+            model, pair_idx=0,
+            feature_names=["pos", "cat", "pop", "itype"],
+        )
+        assert fig is not None
+
+    def test_custom_ranges(self):
+        model = GA2M_Paper(
+            num_features=4, interaction_pairs=[(0, 1)],
+            hidden_dims=[8, 4], interaction_hidden=[8, 4],
+        )
+        fig = plot_interaction_heatmap(
+            model, pair_idx=0,
+            x1_range=(-2, 2), x2_range=(0, 5),
+        )
+        assert fig is not None
+
+
+class TestPlotInteractionGrid:
+    def test_multiple_pairs(self):
+        pairs = [(0, 1), (0, 2), (1, 2)]
+        model = GA2M_Paper(
+            num_features=4, interaction_pairs=pairs,
+            hidden_dims=[8, 4], interaction_hidden=[8, 4],
+        )
+        fig = plot_interaction_grid(model)
+        assert fig is not None
+
+    def test_single_pair(self):
+        model = GA2M_Paper(
+            num_features=4, interaction_pairs=[(0, 1)],
+            hidden_dims=[8, 4], interaction_hidden=[8, 4],
+        )
+        fig = plot_interaction_grid(model)
+        assert fig is not None
+
+    def test_no_pairs(self):
+        model = GA2M_Paper(
+            num_features=4, interaction_pairs=[],
+            hidden_dims=[8, 4],
+        )
+        fig = plot_interaction_grid(model)
+        assert fig is not None
+
+    def test_with_feature_names_and_ranges(self):
+        pairs = [(0, 1), (2, 3)]
+        model = GA2M_Paper(
+            num_features=4, interaction_pairs=pairs,
+            hidden_dims=[8, 4], interaction_hidden=[8, 4],
+        )
+        fig = plot_interaction_grid(
+            model,
+            feature_names=["pos", "cat", "pop", "itype"],
+            x_ranges={0: (0, 1), 1: (0, 1), 2: (-3, 3), 3: (0, 2)},
+        )
         assert fig is not None
