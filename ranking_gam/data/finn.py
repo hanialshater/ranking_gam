@@ -53,15 +53,25 @@ FINN_INTERACTION_PAIRS = [
     (1, 6),  # category x same_cat_before
 ]
 
+# Google Drive file IDs from official repo: finn-no/recsys_slates_dataset
+_GDRIVE_IDS = {
+    "data_int32": "1XHqyk01qi9qnvBTfWWwqgDzrdjv1eBVV",
+    "data_full": "1VXKXIvPCJ7z4BCa4G_5-Q2XMAD7nXOc7",
+    "ind2val": "1WOCKfuttMacCb84yQYcRjxjEtgPp6F4N",
+    "itemattr": "1rKKyMQZqWp8vQ-Pl1SeHrQxzc5dXldnR",
+}
+
 
 def _download_finn(data_dir, use_int32=True):
     """Download FINN slate data files using gdown.
 
+    Uses ``fuzzy=True`` to work around Google Drive rate-limiting.
+    File IDs from https://github.com/finn-no/recsys_slates_dataset
+
     Args:
         data_dir: directory to save files
         use_int32: if True, download the int32 version of data.npz which
-            uses less memory (recommended for most systems). File IDs from
-            https://github.com/finn-no/recsys_slates_dataset
+            uses less memory (recommended for most systems)
     """
     try:
         import gdown
@@ -73,25 +83,39 @@ def _download_finn(data_dir, use_int32=True):
 
     os.makedirs(data_dir, exist_ok=True)
 
-    # File IDs from official repo: finn-no/recsys_slates_dataset
-    if use_int32:
-        data_fileid = "1XHqyk01qi9qnvBTfWWwqgDzrdjv1eBVV"
-    else:
-        data_fileid = "1VXKXIvPCJ7z4BCa4G_5-Q2XMAD7nXOc7"
-
+    data_fileid = _GDRIVE_IDS["data_int32" if use_int32 else "data_full"]
     files = {
         "data.npz": data_fileid,
-        "ind2val.json": "1WOCKfuttMacCb84yQYcRjxjEtgPp6F4N",
-        "itemattr.npz": "1rKKyMQZqWp8vQ-Pl1SeHrQxzc5dXldnR",
+        "ind2val.json": _GDRIVE_IDS["ind2val"],
+        "itemattr.npz": _GDRIVE_IDS["itemattr"],
     }
 
     for fname, gdrive_id in files.items():
         fpath = os.path.join(data_dir, fname)
         if os.path.exists(fpath):
             continue
+
         url = f"https://drive.google.com/uc?id={gdrive_id}"
         print(f"  Downloading {fname}...")
-        gdown.download(url, fpath, quiet=False)
+
+        # Try with fuzzy=True first (handles rate-limited / confirmation pages)
+        try:
+            gdown.download(url, fpath, quiet=False, fuzzy=True)
+        except TypeError:
+            # Older gdown without fuzzy parameter
+            gdown.download(url, fpath, quiet=False)
+
+        if not os.path.exists(fpath):
+            raise RuntimeError(
+                f"Failed to download {fname}. Google Drive may be rate-limiting.\n"
+                f"Manual download:\n"
+                f"  1. Open https://drive.google.com/uc?id={gdrive_id} in a browser\n"
+                f"  2. Save the file as {fpath}\n"
+                f"Or use the official dataset helper:\n"
+                f"  pip install recsys-slates-dataset\n"
+                f"  python -c \"from recsys_slates_dataset.data_helper import "
+                f"download_data_files; download_data_files('{data_dir}')\""
+            )
 
     return True
 
@@ -184,11 +208,41 @@ def _engineer_features(
     return X, y
 
 
+def _load_from_files(data_dir):
+    """Load raw arrays from FINN npz/json files.
+
+    Returns:
+        dict with raw arrays, or None if files missing
+    """
+    data_path = os.path.join(data_dir, "data.npz")
+    itemattr_path = os.path.join(data_dir, "itemattr.npz")
+    ind2val_path = os.path.join(data_dir, "ind2val.json")
+
+    if not all(os.path.exists(p) for p in [data_path, itemattr_path, ind2val_path]):
+        return None
+
+    data = np.load(data_path, allow_pickle=True)
+    itemattr = np.load(itemattr_path, allow_pickle=True)
+
+    with open(ind2val_path) as f:
+        ind2val = json.load(f)
+
+    return {
+        "slates": data["slate"],
+        "clicks": data["click"],
+        "click_idx": data["click_idx"],
+        "slate_lengths": data["slate_lengths"],
+        "interaction_types": data["interaction_type"],
+        "item_categories": itemattr["itemattr"].flatten(),
+        "ind2val": ind2val,
+    }
+
+
 def load_finn(data_dir="data/finn", max_queries=10000, list_size=20,
               train_frac=0.8, seed=42):
     """Load FINN RecSys Slates dataset for GA2M training.
 
-    Downloads automatically if not present (~1.3GB).
+    Downloads automatically if not present.
 
     Each "query" is one slate presentation. Features are engineered
     per-item to support GA2M with position-item interactions.
@@ -213,26 +267,31 @@ def load_finn(data_dir="data/finn", max_queries=10000, list_size=20,
     """
     os.makedirs(data_dir, exist_ok=True)
 
-    # Check for data files
-    data_path = os.path.join(data_dir, "data.npz")
-    if not os.path.exists(data_path):
+    # Try loading existing files first
+    raw = _load_from_files(data_dir)
+
+    if raw is None:
+        # Try downloading
         print(f"FINN data not found in {data_dir}. Downloading...")
         _download_finn(data_dir)
+        raw = _load_from_files(data_dir)
+
+    if raw is None:
+        raise FileNotFoundError(
+            f"FINN data files not found in {data_dir} after download attempt.\n"
+            "Please manually download data.npz, itemattr.npz, ind2val.json from:\n"
+            "  https://github.com/finn-no/recsys_slates_dataset\n"
+            f"and place them in {data_dir}/"
+        )
 
     print("Loading FINN RecSys Slates dataset...")
-    data = np.load(data_path, allow_pickle=True)
-    itemattr = np.load(os.path.join(data_dir, "itemattr.npz"), allow_pickle=True)
-
-    with open(os.path.join(data_dir, "ind2val.json")) as f:
-        ind2val = json.load(f)
-
-    slates = data["slate"]            # [N, 20]
-    clicks = data["click"]            # [N]
-    click_idx = data["click_idx"]     # [N]
-    slate_lengths = data["slate_lengths"]  # [N]
-    interaction_types = data["interaction_type"]  # [N]
-
-    item_categories = itemattr["itemattr"].flatten()  # [n_items]
+    slates = raw["slates"]
+    clicks = raw["clicks"]
+    click_idx = raw["click_idx"]
+    slate_lengths = raw["slate_lengths"]
+    interaction_types = raw["interaction_types"]
+    item_categories = raw["item_categories"]
+    ind2val = raw["ind2val"]
     n_items = len(item_categories)
 
     N_total = len(slates)
