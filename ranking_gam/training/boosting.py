@@ -307,15 +307,22 @@ def train_gbdt_residual_boost(
 
     # Residual = true relevance - normalized GAM score
     # This captures what the GAM missed per document.
+    # Uses IQR-based robust normalization instead of std to avoid
+    # amplifying residuals when the GAM is well-calibrated (std ~ 0).
     def _make_residual_labels(y_true, gam_scores):
         valid = y_true >= 0
         residuals = np.full_like(y_true, -1, dtype=np.float32)
         if valid.any():
             gs = gam_scores.copy()
-            g_mean, g_std = gs[valid].mean(), max(gs[valid].std(), 1e-6)
-            y_mean, y_std = y_true[valid].astype(np.float32).mean(), max(y_true[valid].astype(np.float32).std(), 1e-6)
-            gs_norm = (gs - g_mean) / g_std * y_std + y_mean
-            residuals[valid] = y_true[valid].astype(np.float32) - gs_norm[valid]
+            y_valid = y_true[valid].astype(np.float32)
+
+            g_q25, g_med, g_q75 = np.percentile(gs[valid], [25, 50, 75])
+            y_q25, y_med, y_q75 = np.percentile(y_valid, [25, 50, 75])
+            g_iqr = max(g_q75 - g_q25, 1e-6)
+            y_iqr = max(y_q75 - y_q25, 1e-6)
+
+            gs_norm = (gs - g_med) / g_iqr * y_iqr + y_med
+            residuals[valid] = y_valid - gs_norm[valid]
         return residuals
 
     train_residuals = _make_residual_labels(train_y, gam_scores_train)
@@ -334,6 +341,7 @@ def train_gbdt_residual_boost(
     # Keep the D trained towers frozen, only train the new GBDT tower (D+1).
     print("\n  Stage 3: Training magic curve tower (freeze existing D towers)...")
     train_X_boosted = compute_gbdt_residual_feature(gbdt_model, train_X)
+    eval_X_boosted = compute_gbdt_residual_feature(gbdt_model, eval_X)
 
     # Infer model config from original
     tower_hidden = []
@@ -378,7 +386,16 @@ def train_gbdt_residual_boost(
             for param in boosted_model.feature_transforms[j].parameters():
                 param.requires_grad = False
 
-    train_loader_b, val_loader_b = train_loader_fn(train_X_boosted, train_y)
+    train_loader_b, _ = train_loader_fn(train_X_boosted, train_y)
+    # Build val loader from boosted eval data directly so validation uses
+    # the correct D+1 features (not the un-boosted eval_X).
+    from torch.utils.data import DataLoader, TensorDataset
+
+    _val_ds = TensorDataset(
+        torch.from_numpy(eval_X_boosted),
+        torch.from_numpy(eval_y.astype(np.float32)),
+    )
+    val_loader_b = DataLoader(_val_ds, batch_size=train_loader_b.batch_size)
     boosted_ndcg = train_model(
         boosted_model, train_loader_b, val_loader_b, loss_fn,
         epochs=boost_epochs, device=device, **train_kwargs,

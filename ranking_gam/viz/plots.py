@@ -178,7 +178,7 @@ def plot_diversity_curves(model):
 
 def plot_spider(
     strategies, metrics=None, title="Multi-Objective Ranking Comparison",
-    normalize=True, figsize=(8, 8), colors=None,
+    normalize=True, figsize=(8, 8), colors=None, calibration=None,
 ):
     """
     Spider/radar plot comparing multiple ranking strategies across objectives.
@@ -187,9 +187,16 @@ def plot_spider(
         strategies: dict {strategy_name: metrics_dict}
         metrics: list of metric keys to show (or None for defaults)
         title: plot title
-        normalize: if True, scale each axis to [0, 1]
+        normalize: if True, scale each axis to [0, 1] using calibration bounds
         figsize: figure size
         colors: list of colors per strategy
+        calibration: dict {metric_key: (min, max)} defining the absolute scale
+            for each axis.  When normalize=True (default), each axis is mapped
+            from [cal_min, cal_max] -> [0, 1] so that the radar shape reflects
+            how close each metric is to its theoretical best, not just how
+            strategies compare to each other.
+            Defaults are provided for common ranking metrics (NDCG, coverage,
+            entropy, etc.).  Pass explicit bounds to override.
 
     Returns:
         matplotlib figure
@@ -215,6 +222,22 @@ def plot_spider(
         "ild": "Intra-List\nDiversity",
     }
 
+    # Sensible absolute bounds for common ranking metrics.
+    # (min_meaningful, max_meaningful) -- values are clipped to this range.
+    default_calibration = {
+        "ndcg": (0.0, 1.0),
+        "alpha_ndcg": (0.0, 1.0),
+        "precision": (0.0, 1.0),
+        "mean_rel": (0.0, 4.0),
+        "cat_coverage": (0.0, 1.0),
+        "brand_coverage": (0.0, 1.0),
+        "cat_entropy": (0.0, 3.0),
+        "brand_entropy": (0.0, 3.0),
+        "price_std": (0.0, 2.0),
+        "ild": (0.0, 1.0),
+    }
+    cal = {**default_calibration, **(calibration or {})}
+
     if colors is None:
         colors = [
             "#3498db", "#e74c3c", "#2ecc71", "#f39c12", "#9b59b6",
@@ -231,11 +254,13 @@ def plot_spider(
             raw[i, j] = strategies[name].get(m, 0.0)
 
     if normalize:
-        mins = raw.min(axis=0)
-        maxs = raw.max(axis=0)
-        ranges = maxs - mins
-        ranges[ranges < 1e-10] = 1.0
-        values = (raw - mins) / ranges * 0.8 + 0.1
+        values = np.zeros_like(raw)
+        for j, m in enumerate(metrics):
+            lo, hi = cal.get(m, (0.0, float(raw[:, j].max()) or 1.0))
+            span = hi - lo
+            if span < 1e-10:
+                span = 1.0
+            values[:, j] = np.clip((raw[:, j] - lo) / span, 0.0, 1.0)
     else:
         values = raw
 
@@ -279,7 +304,7 @@ def plot_spider(
     if normalize:
         ax.set_ylim(0, 1.05)
         ax.set_yticks([0.2, 0.4, 0.6, 0.8])
-        ax.set_yticklabels(["", "", "", ""], fontsize=6)
+        ax.set_yticklabels(["20%", "40%", "60%", "80%"], fontsize=6, color="gray")
 
     ax.legend(loc="upper right", bbox_to_anchor=(1.3, 1.1), fontsize=10, framealpha=0.9, edgecolor="gray")
     ax.set_title(title, fontsize=13, fontweight="bold", pad=25)
