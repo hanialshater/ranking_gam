@@ -174,3 +174,52 @@ class TestEngineerFeatures:
             for p in range(1, len(positions)):
                 if syn["slates"][i, p] > 0:
                     assert positions[p] >= positions[p - 1]
+
+    def test_custom_list_size(self):
+        """Feature engineering should respect custom max_slate."""
+        syn = _make_synthetic_finn(n_interactions=10)
+        item_count, cat_count = _compute_item_stats(
+            syn["slates"], syn["clicks"],
+            syn["item_categories"], syn["n_items"],
+        )
+        item_pop = np.log1p(item_count)
+        item_pop /= max(item_pop.max(), 1e-6)
+        cat_pop = np.log1p(cat_count)
+        cat_pop /= max(cat_pop.max(), 1e-6)
+
+        X, y = _engineer_features(
+            syn["slates"], syn["clicks"], syn["click_idx"],
+            syn["slate_lengths"], syn["interaction_types"],
+            syn["item_categories"], item_pop, cat_pop,
+            max_slate=10,
+        )
+        assert X.shape == (10, 10, FINN_NUM_FEATURES)
+        assert y.shape == (10, 10)
+
+    def test_interaction_type_encoding(self):
+        """Interaction types should be encoded as 0.0, 0.5, 1.0."""
+        syn = _make_synthetic_finn(n_interactions=100)
+        # Force specific interaction types
+        syn["interaction_types"][:] = [0, 1, 2] * 33 + [0]
+
+        item_count, cat_count = _compute_item_stats(
+            syn["slates"], syn["clicks"],
+            syn["item_categories"], syn["n_items"],
+        )
+        item_pop = np.log1p(item_count)
+        item_pop /= max(item_pop.max(), 1e-6)
+        cat_pop = np.log1p(cat_count)
+        cat_pop /= max(cat_pop.max(), 1e-6)
+
+        X, y = _engineer_features(
+            syn["slates"], syn["clicks"], syn["click_idx"],
+            syn["slate_lengths"], syn["interaction_types"],
+            syn["item_categories"], item_pop, cat_pop,
+            max_slate=syn["max_slate"],
+        )
+        # Feature 4 is interaction_type, check first valid position of each type
+        valid_vals = set()
+        for i in range(100):
+            if y[i, 0] >= 0:
+                valid_vals.add(round(float(X[i, 0, 4]), 1))
+        assert valid_vals == {0.0, 0.5, 1.0}
