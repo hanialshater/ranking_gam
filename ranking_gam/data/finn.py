@@ -54,8 +54,15 @@ FINN_INTERACTION_PAIRS = [
 ]
 
 
-def _download_finn(data_dir):
-    """Download FINN slate data files using gdown."""
+def _download_finn(data_dir, use_int32=True):
+    """Download FINN slate data files using gdown.
+
+    Args:
+        data_dir: directory to save files
+        use_int32: if True, download the int32 version of data.npz which
+            uses less memory (recommended for most systems). File IDs from
+            https://github.com/finn-no/recsys_slates_dataset
+    """
     try:
         import gdown
     except ImportError:
@@ -66,10 +73,16 @@ def _download_finn(data_dir):
 
     os.makedirs(data_dir, exist_ok=True)
 
+    # File IDs from official repo: finn-no/recsys_slates_dataset
+    if use_int32:
+        data_fileid = "1XHqyk01qi9qnvBTfWWwqgDzrdjv1eBVV"
+    else:
+        data_fileid = "1VXKXIvPCJ7z4BCa4G_5-Q2XMAD7nXOc7"
+
     files = {
-        "data.npz": "1bBEFI6cWMJxAGSBZfPHLaFMNSKy3oLcG",
-        "ind2val.json": "1DSvLkSfQcV8SB0101TLYtUxiHRRfeHlH",
-        "itemattr.npz": "1-_lDIdFJpWkSRYJv6JsBHN1eCJNMhFpv",
+        "data.npz": data_fileid,
+        "ind2val.json": "1WOCKfuttMacCb84yQYcRjxjEtgPp6F4N",
+        "itemattr.npz": "1rKKyMQZqWp8vQ-Pl1SeHrQxzc5dXldnR",
     }
 
     for fname, gdrive_id in files.items():
