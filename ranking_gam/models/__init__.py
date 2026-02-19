@@ -6,6 +6,7 @@ from .groupwise import GroupwiseFeatureComputer
 from .multi_objective import MultiObjectiveRankingGAM
 from .submodular import SubmodularRankingGAM
 from .towers import ConcavePWL, LearnableMonotoneTransform, MonotonePWL, PaperTower
+from .inverted_transformer import InvertedTransformerRanker
 from .transformer import TransformerRanker
 
 __all__ = [
@@ -22,4 +23,5 @@ __all__ = [
     "SubmodularRankingGAM",
     "MultiObjectiveRankingGAM",
     "TransformerRanker",
+    "InvertedTransformerRanker",
 ]
