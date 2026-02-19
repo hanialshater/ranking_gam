@@ -8,6 +8,7 @@ from .submodular import SubmodularRankingGAM
 from .towers import ConcavePWL, LearnableMonotoneTransform, MonotonePWL, PaperTower
 from .inverted_transformer import InvertedTransformerRanker
 from .transformer import TransformerRanker
+from .gam_former import GAMFormer
 
 __all__ = [
     "PaperTower",
@@ -24,4 +25,5 @@ __all__ = [
     "MultiObjectiveRankingGAM",
     "TransformerRanker",
     "InvertedTransformerRanker",
+    "GAMFormer",
 ]

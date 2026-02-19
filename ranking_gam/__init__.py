@@ -36,6 +36,7 @@ def __getattr__(name):
         "MultiObjectiveRankingGAM": (".models", "MultiObjectiveRankingGAM"),
         "TransformerRanker": (".models", "TransformerRanker"),
         "InvertedTransformerRanker": (".models", "InvertedTransformerRanker"),
+        "GAMFormer": (".models", "GAMFormer"),
         # Losses
         "ApproxNDCGLoss": (".losses", "ApproxNDCGLoss"),
         "PairwiseLoss": (".losses", "PairwiseLoss"),
@@ -116,6 +117,7 @@ __all__ = [
     "MultiObjectiveRankingGAM",
     "TransformerRanker",
     "InvertedTransformerRanker",
+    "GAMFormer",
     # Losses
     "ApproxNDCGLoss",
     "PairwiseLoss",

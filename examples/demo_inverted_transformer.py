@@ -2,10 +2,11 @@
 """
 Inverted Transformer baseline -- feature-interaction upper bound for GAM.
 
-Trains three models and compares NDCG to decompose where gains come from:
+Trains up to four models and compares NDCG to decompose where gains come from:
   1. GAM            — no feature interactions (interpretable baseline)
-  2. InvTransformer — arbitrary feature interactions, no cross-doc (this model)
-  3. Transformer    — arbitrary feature + cross-doc interactions (black-box)
+  2. GAMFormer      — GAM main effects + transformer interactions (hybrid)
+  3. InvTransformer — arbitrary feature interactions, no cross-doc
+  4. Transformer    — arbitrary feature + cross-doc interactions (black-box)
 
 This shows how much NDCG comes from feature interactions vs. cross-document
 interactions, quantifying the cost of interpretability.
@@ -51,6 +52,10 @@ def main():
                         help="also train a GAM for comparison (default: True)")
     parser.add_argument("--no-compare-gam", action="store_true",
                         help="skip GAM comparison")
+    parser.add_argument("--compare-gamformer", action="store_true", default=True,
+                        help="also train GAMFormer hybrid (default: True)")
+    parser.add_argument("--no-compare-gamformer", action="store_true",
+                        help="skip GAMFormer comparison")
     parser.add_argument("--compare-transformer", action="store_true", default=True,
                         help="also train standard TransformerRanker for comparison (default: True)")
     parser.add_argument("--no-compare-transformer", action="store_true",
@@ -64,6 +69,8 @@ def main():
     data = load_data(dataset=args.dataset, data_dir=args.data_dir)
     num_features = data["num_features"]
     results = {}
+    param_counts = {}
+    loss_fn = make_loss(args.loss, args.label_smoothing)
 
     # --- Train Inverted Transformer ---
     print("\n" + "=" * 70)
@@ -79,12 +86,11 @@ def main():
         dropout=args.dropout,
         pooling=args.pooling,
     )
-    n_params = sum(p.numel() for p in inv_transformer.parameters())
-    print(f"  Parameters: {n_params:,}")
+    param_counts["InvertedTransformer"] = sum(p.numel() for p in inv_transformer.parameters())
+    print(f"  Parameters: {param_counts['InvertedTransformer']:,}")
     print(f"  Scores each document independently (no cross-doc attention)")
     print(f"  Captures feature interactions via self-attention across features")
 
-    loss_fn = make_loss(args.loss, args.label_smoothing)
     inv_ndcg = rg.train_model(
         inv_transformer, data["train_loader"], data["eval_loader"], loss_fn,
         epochs=args.epochs, patience=args.patience, device=device,
@@ -93,6 +99,44 @@ def main():
     )
     results["InvertedTransformer"] = inv_ndcg
     print(f"\n  Inverted Transformer: NDCG@{args.k} = {inv_ndcg:.4f}")
+
+    # --- Train GAMFormer hybrid ---
+    if args.compare_gamformer and not args.no_compare_gamformer:
+        print("\n" + "=" * 70)
+        print("GAMFormer (GAM main effects + transformer interactions)")
+        print("=" * 70)
+
+        gamformer = rg.GAMFormer(
+            num_features=num_features,
+            hidden_dims=[16, 8],
+            residual=args.residual,
+            feature_transforms=args.transforms,
+            activation=args.activation,
+            d_model=args.d_model,
+            nhead=args.nhead,
+            num_layers=args.num_layers,
+            dim_feedforward=args.dim_feedforward,
+            dropout=args.dropout,
+            pooling=args.pooling,
+        )
+        if args.transforms:
+            gamformer.init_transforms_from_data(data["train_X"])
+
+        param_counts["GAMFormer"] = sum(p.numel() for p in gamformer.parameters())
+        print(f"  Parameters: {param_counts['GAMFormer']:,}"
+              f"  (GAM: {gamformer.gam_param_count():,}"
+              f" + Transformer: {gamformer.transformer_param_count():,})")
+        print(f"  GAM towers: interpretable main effects (distillable to PWL)")
+        print(f"  Transformer: learns interaction residual via feature attention")
+
+        gf_ndcg = rg.train_model(
+            gamformer, data["train_loader"], data["eval_loader"], loss_fn,
+            epochs=args.epochs, patience=args.patience, device=device,
+            lr_schedule=args.lr_schedule,
+            l1_output_reg=args.l1_reg, weight_decay=args.weight_decay,
+        )
+        results["GAMFormer"] = gf_ndcg
+        print(f"\n  GAMFormer: NDCG@{args.k} = {gf_ndcg:.4f}")
 
     # --- Train GAM for comparison ---
     if not args.no_compare_gam:
@@ -108,8 +152,8 @@ def main():
         if args.transforms:
             gam.init_transforms_from_data(data["train_X"])
 
-        gam_params = sum(p.numel() for p in gam.parameters())
-        print(f"  Parameters: {gam_params:,}")
+        param_counts["GAM"] = sum(p.numel() for p in gam.parameters())
+        print(f"  Parameters: {param_counts['GAM']:,}")
 
         gam_ndcg = rg.train_model(
             gam, data["train_loader"], data["eval_loader"], loss_fn,
@@ -134,8 +178,8 @@ def main():
             dim_feedforward=args.dim_feedforward,
             dropout=args.dropout,
         )
-        t_params = sum(p.numel() for p in transformer.parameters())
-        print(f"  Parameters: {t_params:,}")
+        param_counts["Transformer"] = sum(p.numel() for p in transformer.parameters())
+        print(f"  Parameters: {param_counts['Transformer']:,}")
 
         t_ndcg = rg.train_model(
             transformer, data["train_loader"], data["eval_loader"], loss_fn,
@@ -150,14 +194,6 @@ def main():
     print("\n" + "=" * 70)
     print("RESULTS — NDCG@{} comparison".format(args.k))
     print("=" * 70)
-    # Show param counts alongside NDCG
-    param_counts = {
-        "InvertedTransformer": n_params,
-    }
-    if "GAM" in results:
-        param_counts["GAM"] = sum(p.numel() for p in gam.parameters())
-    if "Transformer" in results:
-        param_counts["Transformer"] = sum(p.numel() for p in transformer.parameters())
 
     for name, ndcg in sorted(results.items(), key=lambda x: -x[1]):
         params = param_counts.get(name, 0)
@@ -168,18 +204,24 @@ def main():
         total_gap = results["Transformer"] - results["GAM"]
         feat_gap = inv_ndcg - results["GAM"]
         doc_gap = results["Transformer"] - inv_ndcg
-        print(f"\n  {'─' * 55}")
+        print(f"\n  {'─' * 60}")
         print(f"  Interpretability spectrum:")
-        print(f"    GAM (no interactions)         → baseline")
-        print(f"    + feature interactions         → {feat_gap:+.4f}  (InvertedTransformer)")
-        print(f"    + cross-doc interactions       → {doc_gap:+.4f}  (Transformer)")
-        print(f"    Total gap (Transformer - GAM)  = {total_gap:+.4f}")
+        print(f"    GAM (no interactions)           → baseline")
+        if "GAMFormer" in results:
+            gf_gap = results["GAMFormer"] - results["GAM"]
+            print(f"    + GAM + transformer interactions → {gf_gap:+.4f}  (GAMFormer)")
+        print(f"    + all feature interactions       → {feat_gap:+.4f}  (InvertedTransformer)")
+        print(f"    + cross-doc interactions         → {doc_gap:+.4f}  (Transformer)")
+        print(f"    Total gap (Transformer - GAM)    = {total_gap:+.4f}")
         if total_gap > 0:
-            print(f"    Feature interactions explain    {feat_gap / total_gap * 100:.0f}% of the gap")
-        print(f"  {'─' * 55}")
+            print(f"    Feature interactions explain      {feat_gap / total_gap * 100:.0f}% of the gap")
+        print(f"  {'─' * 60}")
     elif "GAM" in results:
         gap = inv_ndcg - results["GAM"]
         print(f"\n  Feature interaction gain (InvTransformer - GAM): {gap:+.4f}")
+        if "GAMFormer" in results:
+            gf_gap = results["GAMFormer"] - results["GAM"]
+            print(f"  GAMFormer gain over GAM: {gf_gap:+.4f}")
     elif "Transformer" in results:
         gap = results["Transformer"] - inv_ndcg
         print(f"\n  Cross-doc interaction gain (Transformer - InvTransformer): {gap:+.4f}")
