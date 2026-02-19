@@ -40,8 +40,8 @@ def main():
                         help="number of attention heads (default: 4)")
     parser.add_argument("--num-layers", type=int, default=2,
                         help="number of transformer layers (default: 2)")
-    parser.add_argument("--dim-feedforward", type=int, default=128,
-                        help="FFN hidden dimension (default: 128)")
+    parser.add_argument("--dim-feedforward", type=int, default=None,
+                        help="FFN hidden dimension (default: 4 * d_model)")
     parser.add_argument("--dropout", type=float, default=0.1,
                         help="dropout rate (default: 0.1)")
     parser.add_argument("--pooling", type=str, default="cls",
