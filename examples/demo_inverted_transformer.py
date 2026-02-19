@@ -2,17 +2,20 @@
 """
 Inverted Transformer baseline -- feature-interaction upper bound for GAM.
 
-Trains an inverted transformer where self-attention operates across *features*
-(each feature is a token) rather than across documents. This captures arbitrary
-feature interactions while still scoring each document independently, sitting
-between GAM (no interactions) and the standard TransformerRanker (full
-cross-document interactions).
+Trains three models and compares NDCG to decompose where gains come from:
+  1. GAM            — no feature interactions (interpretable baseline)
+  2. InvTransformer — arbitrary feature interactions, no cross-doc (this model)
+  3. Transformer    — arbitrary feature + cross-doc interactions (black-box)
+
+This shows how much NDCG comes from feature interactions vs. cross-document
+interactions, quantifying the cost of interpretability.
 
 Usage:
     python examples/demo_inverted_transformer.py
     python examples/demo_inverted_transformer.py --loss ndcg2pp --epochs 30
     python examples/demo_inverted_transformer.py --d-model 128 --num-layers 3
     python examples/demo_inverted_transformer.py --pooling mean
+    python examples/demo_inverted_transformer.py --no-compare-transformer  # skip standard transformer
 """
 
 import matplotlib
@@ -48,8 +51,10 @@ def main():
                         help="also train a GAM for comparison (default: True)")
     parser.add_argument("--no-compare-gam", action="store_true",
                         help="skip GAM comparison")
-    parser.add_argument("--compare-transformer", action="store_true", default=False,
-                        help="also train standard TransformerRanker for comparison")
+    parser.add_argument("--compare-transformer", action="store_true", default=True,
+                        help="also train standard TransformerRanker for comparison (default: True)")
+    parser.add_argument("--no-compare-transformer", action="store_true",
+                        help="skip standard Transformer comparison")
     args = resolve_args(parser.parse_args())
 
     extra = [f"d_model={args.d_model}", f"layers={args.num_layers}",
@@ -116,7 +121,7 @@ def main():
         print(f"\n  GAM: NDCG@{args.k} = {gam_ndcg:.4f}")
 
     # --- Train standard Transformer for comparison ---
-    if args.compare_transformer:
+    if args.compare_transformer and not args.no_compare_transformer:
         print("\n" + "=" * 70)
         print("Standard Transformer (cross-document attention)")
         print("=" * 70)
@@ -143,17 +148,41 @@ def main():
 
     # --- Summary ---
     print("\n" + "=" * 70)
-    print("RESULTS")
+    print("RESULTS — NDCG@{} comparison".format(args.k))
     print("=" * 70)
-    for name, ndcg in sorted(results.items(), key=lambda x: -x[1]):
-        print(f"  {name:<28} NDCG@{args.k} = {ndcg:.4f}")
-
+    # Show param counts alongside NDCG
+    param_counts = {
+        "InvertedTransformer": n_params,
+    }
     if "GAM" in results:
+        param_counts["GAM"] = sum(p.numel() for p in gam.parameters())
+    if "Transformer" in results:
+        param_counts["Transformer"] = sum(p.numel() for p in transformer.parameters())
+
+    for name, ndcg in sorted(results.items(), key=lambda x: -x[1]):
+        params = param_counts.get(name, 0)
+        print(f"  {name:<28} NDCG@{args.k} = {ndcg:.4f}  ({params:>8,} params)")
+
+    # Decompose where the NDCG gains come from
+    if "GAM" in results and "Transformer" in results:
+        total_gap = results["Transformer"] - results["GAM"]
+        feat_gap = inv_ndcg - results["GAM"]
+        doc_gap = results["Transformer"] - inv_ndcg
+        print(f"\n  {'─' * 55}")
+        print(f"  Interpretability spectrum:")
+        print(f"    GAM (no interactions)         → baseline")
+        print(f"    + feature interactions         → {feat_gap:+.4f}  (InvertedTransformer)")
+        print(f"    + cross-doc interactions       → {doc_gap:+.4f}  (Transformer)")
+        print(f"    Total gap (Transformer - GAM)  = {total_gap:+.4f}")
+        if total_gap > 0:
+            print(f"    Feature interactions explain    {feat_gap / total_gap * 100:.0f}% of the gap")
+        print(f"  {'─' * 55}")
+    elif "GAM" in results:
         gap = inv_ndcg - results["GAM"]
         print(f"\n  Feature interaction gain (InvTransformer - GAM): {gap:+.4f}")
-    if "Transformer" in results:
+    elif "Transformer" in results:
         gap = results["Transformer"] - inv_ndcg
-        print(f"  Cross-doc interaction gain (Transformer - InvTransformer): {gap:+.4f}")
+        print(f"\n  Cross-doc interaction gain (Transformer - InvTransformer): {gap:+.4f}")
 
 
 if __name__ == "__main__":
