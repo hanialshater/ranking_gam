@@ -141,11 +141,29 @@ def load_svmlight_dataset(train_path, test_path, num_features,
     return train_X, train_y, eval_X, eval_y
 
 
+def _download_file(url, dest_path):
+    """Download a URL to a local file with a browser-like User-Agent.
+
+    Many CDNs and cloud storage services (OneDrive, etc.) reject requests
+    from bare urllib without a User-Agent header.
+    """
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": "Mozilla/5.0 (ranking_gam dataset downloader)"},
+    )
+    with urllib.request.urlopen(req) as resp, open(dest_path, "wb") as f:
+        while True:
+            chunk = resp.read(1 << 20)  # 1MB chunks
+            if not chunk:
+                break
+            f.write(chunk)
+
+
 def download_and_extract(url, data_dir, target_filename, extract_dir=None):
     """Download a file and extract it (zip or tar.gz).
 
     Args:
-        url: download URL
+        url: download URL (or list of URLs to try as fallbacks)
         data_dir: directory to save/extract into
         target_filename: filename for the downloaded archive
         extract_dir: subdirectory name after extraction (None = data_dir)
@@ -157,8 +175,26 @@ def download_and_extract(url, data_dir, target_filename, extract_dir=None):
     archive_path = os.path.join(data_dir, target_filename)
 
     if not os.path.exists(archive_path):
+        urls = url if isinstance(url, (list, tuple)) else [url]
         print(f"  Downloading {target_filename}...")
-        urllib.request.urlretrieve(url, archive_path)
+        last_err = None
+        for u in urls:
+            try:
+                _download_file(u, archive_path)
+                last_err = None
+                break
+            except Exception as e:
+                last_err = e
+                print(f"  Download failed ({e}), trying next mirror...")
+                if os.path.exists(archive_path):
+                    os.remove(archive_path)
+        if last_err is not None:
+            raise RuntimeError(
+                f"All download URLs failed for {target_filename}. "
+                f"Last error: {last_err}\n"
+                f"You can manually download the file and place it at:\n"
+                f"  {archive_path}"
+            ) from last_err
 
     print(f"  Extracting {target_filename}...")
     if target_filename.endswith(".zip"):
