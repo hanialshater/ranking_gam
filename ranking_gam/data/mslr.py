@@ -13,8 +13,10 @@ from .svmlight import download_and_extract, load_svmlight_dataset
 
 MSLR_NUM_FEATURES = 136
 
-# OneDrive API URLs (same as pytorchltr)
-_MSLR10K_URL = "https://api.onedrive.com/v1.0/shares/s!AtsMfWUz5l8nbOIoJ6Ks0bEMp78/root/content"
+# Primary download URL (Google Cloud Storage mirror, fast and reliable)
+_MSLR10K_URL = "https://storage.googleapis.com/personalization-takehome/MSLR-WEB10K.zip"
+
+# OneDrive API URL for WEB30K (no GCS mirror available)
 _MSLR30K_URL = "https://api.onedrive.com/v1.0/shares/s!AtsMfWUz5l8nbXGPBlwD1rnFdBY/root/content"
 
 
