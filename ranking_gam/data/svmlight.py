@@ -158,7 +158,15 @@ def download_and_extract(url, data_dir, target_filename, extract_dir=None):
 
     if not os.path.exists(archive_path):
         print(f"  Downloading {target_filename}...")
-        urllib.request.urlretrieve(url, archive_path)
+        req = urllib.request.Request(
+            url, headers={"User-Agent": "ranking_gam/1.0"},
+        )
+        with urllib.request.urlopen(req) as resp, open(archive_path, "wb") as f:
+            while True:
+                chunk = resp.read(1 << 20)  # 1 MB chunks
+                if not chunk:
+                    break
+                f.write(chunk)
 
     print(f"  Extracting {target_filename}...")
     if target_filename.endswith(".zip"):
