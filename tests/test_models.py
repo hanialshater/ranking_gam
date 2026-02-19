@@ -8,6 +8,7 @@ from ranking_gam.models import (
     ContextPresentGA2M,
     GA2M_Paper,
     GAM_Paper,
+    InvertedTransformerRanker,
     MultiObjectiveRankingGAM,
     SubmodularRankingGAM,
     TransformerRanker,
@@ -458,3 +459,87 @@ class TestContextGAM:
         X_t = torch.from_numpy(X)
         out = model(X_t)
         assert out.shape == (X.shape[0], X.shape[1])
+
+
+class TestInvertedTransformerRanker:
+    def test_forward_shape(self, synthetic_tensors):
+        X, _ = synthetic_tensors
+        B, L, D = X.shape
+        model = InvertedTransformerRanker(
+            num_features=D, d_model=16, nhead=2, num_layers=1, dim_feedforward=32,
+        )
+        out = model(X)
+        assert out.shape == (B, L)
+
+    def test_mean_pooling(self, synthetic_tensors):
+        X, _ = synthetic_tensors
+        B, L, D = X.shape
+        model = InvertedTransformerRanker(
+            num_features=D, d_model=16, nhead=2, num_layers=1, pooling="mean",
+        )
+        out = model(X)
+        assert out.shape == (B, L)
+
+    def test_gradient_flows(self, synthetic_tensors):
+        X, _ = synthetic_tensors
+        model = InvertedTransformerRanker(
+            num_features=X.shape[-1], d_model=16, nhead=2, num_layers=1,
+        )
+        out = model(X)
+        out.sum().backward()
+        for name, p in model.named_parameters():
+            assert p.grad is not None, f"No gradient for {name}"
+
+    def test_no_cross_document_interaction(self, synthetic_tensors):
+        """Inverted transformer scores each document independently."""
+        X, _ = synthetic_tensors
+        D = X.shape[-1]
+        model = InvertedTransformerRanker(
+            num_features=D, d_model=16, nhead=2, num_layers=1,
+        )
+        model.eval()
+        with torch.no_grad():
+            scores_full = model(X[:1])
+            # Change a different document — should NOT affect score of doc 0
+            X_mod = X[:1].clone()
+            X_mod[0, 1, :] += 10.0
+            scores_mod = model(X_mod)
+        # Score of doc 0 should be identical since there's no cross-doc attention
+        torch.testing.assert_close(
+            scores_full[0, 0:1], scores_mod[0, 0:1],
+            msg="Inverted transformer should NOT have cross-document interactions",
+        )
+
+    def test_eval_deterministic(self, synthetic_tensors):
+        X, _ = synthetic_tensors
+        model = InvertedTransformerRanker(
+            num_features=X.shape[-1], d_model=16, nhead=2, num_layers=1,
+        )
+        model.eval()
+        with torch.no_grad():
+            out1 = model(X)
+            out2 = model(X)
+        assert torch.allclose(out1, out2)
+
+    def test_get_feature_attention(self, synthetic_tensors):
+        X, _ = synthetic_tensors
+        D = X.shape[-1]
+        model = InvertedTransformerRanker(
+            num_features=D, d_model=16, nhead=2, num_layers=1, pooling="cls",
+        )
+        attn = model.get_feature_attention(X[:1, :1])
+        # CLS pooling: D+1 tokens (CLS + D features)
+        assert attn.shape == (D + 1, D + 1)
+        # Rows should sum to ~1 (attention is a distribution)
+        row_sums = attn.sum(dim=-1)
+        assert torch.allclose(row_sums, torch.ones_like(row_sums), atol=1e-4)
+
+    def test_get_feature_attention_mean_pooling(self, synthetic_tensors):
+        X, _ = synthetic_tensors
+        D = X.shape[-1]
+        model = InvertedTransformerRanker(
+            num_features=D, d_model=16, nhead=2, num_layers=1, pooling="mean",
+        )
+        attn = model.get_feature_attention(X[:1, :1])
+        # Mean pooling: D tokens (no CLS)
+        assert attn.shape == (D, D)
