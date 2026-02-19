@@ -21,13 +21,19 @@ Key properties:
     - Useful baseline to isolate the value of feature interactions from
       cross-document interactions.
 
-Architecture:
+Architecture (aligned with iTransformer paper):
     Input: [B, L, D] features
-    -> Per-feature linear embedding: scalar -> d_model   [B*L, D, d_model]
+    -> Per-feature embedding: each feature gets its own Linear(1, d_model) + LayerNorm
     -> Add learnable feature position embeddings
-    -> N Transformer encoder layers (self-attention across features)
+    -> N pre-norm Transformer encoder layers (self-attention across features)
     -> Pool across features (CLS token or mean)
     -> Linear score head -> [B, L] scores
+
+Changes from original implementation to match the paper:
+    1. Per-feature embeddings (not shared) — each feature gets a distinct projection
+    2. Pre-norm transformer blocks (norm_first=True) — more stable training
+    3. LayerNorm after embedding — acts as instance norm on feature representations
+    4. 4x FFN multiplier (dim_feedforward=4*d_model) — paper default
 """
 
 import torch
@@ -49,7 +55,7 @@ class InvertedTransformerRanker(nn.Module):
         d_model=64,
         nhead=4,
         num_layers=2,
-        dim_feedforward=128,
+        dim_feedforward=None,
         dropout=0.1,
         pooling="cls",
     ):
@@ -60,6 +66,7 @@ class InvertedTransformerRanker(nn.Module):
             nhead: number of attention heads.
             num_layers: number of transformer encoder layers.
             dim_feedforward: FFN hidden dimension inside each layer.
+                Default: 4 * d_model (paper default).
             dropout: dropout rate.
             pooling: how to aggregate feature tokens into a score.
                 "cls" — prepend a learnable [CLS] token, use its output.
@@ -70,10 +77,20 @@ class InvertedTransformerRanker(nn.Module):
         self.d_model = d_model
         self.pooling = pooling
 
-        # Embed each scalar feature value into d_model dimensions.
-        # Separate projection per feature so the model can learn
-        # feature-specific embeddings (like per-feature towers in GAM).
-        self.feature_embed = nn.Linear(1, d_model)
+        if dim_feedforward is None:
+            dim_feedforward = 4 * d_model
+
+        # Per-feature embedding: each feature gets its own learned projection.
+        # In the paper, each variate's full series is projected to d_model;
+        # for ranking (scalar features), we use per-feature Linear(1, d_model)
+        # so each feature learns a distinct embedding (analogous to GAM towers).
+        self.feature_embeds = nn.ModuleList([
+            nn.Linear(1, d_model) for _ in range(num_features)
+        ])
+
+        # LayerNorm after embedding (paper: normalizes variate token
+        # representations, acts as instance normalization across features)
+        self.embed_norm = nn.LayerNorm(d_model)
 
         # Learnable position embedding so the model knows which feature
         # is which (features have no inherent ordering).
@@ -83,7 +100,7 @@ class InvertedTransformerRanker(nn.Module):
         if pooling == "cls":
             self.cls_token = nn.Parameter(torch.randn(1, 1, d_model) * 0.02)
 
-        # Transformer encoder: self-attention across features
+        # Pre-norm Transformer encoder (paper uses pre-norm: norm before attn/FFN)
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=d_model,
             nhead=nhead,
@@ -91,9 +108,11 @@ class InvertedTransformerRanker(nn.Module):
             dropout=dropout,
             batch_first=True,
             activation="gelu",
+            norm_first=True,
         )
         self.encoder = nn.TransformerEncoder(
-            encoder_layer, num_layers=num_layers
+            encoder_layer, num_layers=num_layers,
+            norm=nn.LayerNorm(d_model),
         )
 
         # Score head
@@ -114,6 +133,22 @@ class InvertedTransformerRanker(nn.Module):
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
 
+    def _embed_features(self, x_flat):
+        """Embed each scalar feature with its own projection.
+
+        Args:
+            x_flat: [N, D] where N = B*L, D = num_features.
+
+        Returns:
+            [N, D, d_model] feature tokens.
+        """
+        # x_flat[:, i] is the i-th feature for all documents
+        tokens = torch.stack([
+            self.feature_embeds[i](x_flat[:, i:i+1])
+            for i in range(self.num_features)
+        ], dim=1)  # [N, D, d_model]
+        return self.embed_norm(tokens)
+
     def forward(self, x):
         """
         Args:
@@ -127,9 +162,8 @@ class InvertedTransformerRanker(nn.Module):
         # Flatten batch and list dims: [B*L, D]
         x_flat = x.reshape(batch_size * list_size, num_features)
 
-        # Each feature becomes a token: [B*L, D, 1] -> [B*L, D, d_model]
-        x_tokens = x_flat.unsqueeze(-1)  # [B*L, D, 1]
-        x_tokens = self.feature_embed(x_tokens)  # [B*L, D, d_model]
+        # Per-feature embedding + LayerNorm: [B*L, D, d_model]
+        x_tokens = self._embed_features(x_flat)
 
         # Prepend CLS token if using CLS pooling
         if self.pooling == "cls":
@@ -140,7 +174,7 @@ class InvertedTransformerRanker(nn.Module):
         # Add positional embeddings
         x_tokens = x_tokens + self.pos_embed
 
-        # Self-attention across features
+        # Self-attention across features (pre-norm encoder)
         h = self.encoder(x_tokens)  # [B*L, D(+1), d_model]
 
         # Pool to single vector per document
@@ -170,7 +204,7 @@ class InvertedTransformerRanker(nn.Module):
         self.eval()
         batch_size, list_size, num_features = x.shape
         x_flat = x.reshape(batch_size * list_size, num_features)
-        x_tokens = self.feature_embed(x_flat.unsqueeze(-1))
+        x_tokens = self._embed_features(x_flat)
 
         if self.pooling == "cls":
             n = x_tokens.shape[0]
@@ -184,7 +218,7 @@ class InvertedTransformerRanker(nn.Module):
         h = x_tokens
         with torch.no_grad():
             for layer in self.encoder.layers:
-                # Manually call self-attention to get weights
+                # Pre-norm: norm1 is applied before self-attention
                 h_norm = layer.norm1(h)
                 _, attn_w = layer.self_attn(
                     h_norm, h_norm, h_norm, need_weights=True,
