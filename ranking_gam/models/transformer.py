@@ -32,7 +32,7 @@ class TransformerRanker(nn.Module):
         d_model=64,
         nhead=4,
         num_layers=2,
-        dim_feedforward=128,
+        dim_feedforward=None,
         dropout=0.1,
     ):
         """
@@ -41,11 +41,13 @@ class TransformerRanker(nn.Module):
             d_model: transformer hidden dimension
             nhead: number of attention heads
             num_layers: number of transformer encoder layers
-            dim_feedforward: FFN hidden dimension
+            dim_feedforward: FFN hidden dimension (default: 4 * d_model)
             dropout: dropout rate
         """
         super().__init__()
         self.num_features = num_features
+        if dim_feedforward is None:
+            dim_feedforward = 4 * d_model
 
         # Project features to d_model
         self.input_proj = nn.Linear(num_features, d_model)
