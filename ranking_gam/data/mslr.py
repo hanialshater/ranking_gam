@@ -6,7 +6,6 @@ Both datasets auto-download from Microsoft OneDrive if not found locally.
 Both datasets: 136 features, 5-level relevance (0-4), SVMLight format.
 """
 
-import base64
 import glob
 import os
 
@@ -14,23 +13,9 @@ from .svmlight import download_and_extract, load_svmlight_dataset
 
 MSLR_NUM_FEATURES = 136
 
-# OneDrive sharing URLs from https://www.microsoft.com/en-us/research/project/mslr/
-_MSLR10K_SHARE = "https://1drv.ms/u/s!AtsMfWUz5l8nbOIoJ6Ks0bEMp78"
-_MSLR30K_SHARE = "https://1drv.ms/u/s!AtsMfWUz5l8nbXGPBlwD1rnFdBY"
-
-
-def _onedrive_download_url(share_url):
-    """Convert a OneDrive sharing URL to a direct download API URL.
-
-    Microsoft requires base64url-encoded sharing tokens in the API path.
-    See: https://learn.microsoft.com/en-us/onedrive/developer/rest-api/api/shares_get
-    """
-    token = base64.urlsafe_b64encode(share_url.encode()).decode().rstrip("=")
-    return f"https://api.onedrive.com/v1.0/shares/u!{token}/root/content"
-
-
-_MSLR10K_URL = _onedrive_download_url(_MSLR10K_SHARE)
-_MSLR30K_URL = _onedrive_download_url(_MSLR30K_SHARE)
+# OneDrive API URLs (same as pytorchltr)
+_MSLR10K_URL = "https://api.onedrive.com/v1.0/shares/s!AtsMfWUz5l8nbOIoJ6Ks0bEMp78/root/content"
+_MSLR30K_URL = "https://api.onedrive.com/v1.0/shares/s!AtsMfWUz5l8nbXGPBlwD1rnFdBY/root/content"
 
 
 def _find_split_files(data_dir, dataset_name):
