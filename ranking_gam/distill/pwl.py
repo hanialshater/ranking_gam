@@ -365,6 +365,54 @@ def pwl_predict(pwl, X, q=None):
     return scores
 
 
+def save_pwl_json(pwl, path):
+    """Save distilled PWL model to JSON for Java/serving inference.
+
+    Args:
+        pwl: distilled model dict from distill_to_pwl or distill_context_model
+        path: output file path (e.g. "model.json")
+    """
+    import json
+
+    # Convert interaction tuple keys to lists for JSON serialization
+    out = {
+        "bias": pwl["bias"],
+        "has_context": pwl.get("has_context", False),
+        "main_effects": pwl["main_effects"],
+        "interactions": [
+            {
+                "features": list(p["features"]),
+                "x1_grid": p["x1_grid"],
+                "x2_grid": p["x2_grid"],
+                "z": p["z"],
+            }
+            for p in pwl.get("interactions", [])
+        ],
+        "context_weights": pwl.get("context_weights", []),
+    }
+    with open(path, "w") as f:
+        json.dump(out, f)
+
+
+def load_pwl_json(path):
+    """Load distilled PWL model from JSON.
+
+    Args:
+        path: JSON file path saved by save_pwl_json
+
+    Returns:
+        dict compatible with pwl_predict
+    """
+    import json
+
+    with open(path) as f:
+        pwl = json.load(f)
+    # Convert interaction feature lists back to tuples for pwl_predict compat
+    for p in pwl.get("interactions", []):
+        p["features"] = tuple(p["features"])
+    return pwl
+
+
 def evaluate_pwl(pwl, X, y, q=None, k=10):
     """Evaluate PWL NDCG. Supports context."""
     pred = pwl_predict(pwl, X, q)
