@@ -237,12 +237,48 @@ def distill_to_pwl(model, num_knots=5, grid_size=30, train_X=None):
             )
 
     bias = float(model.global_bias.detach().cpu().numpy().item())
+
+    # Extract diversity towers for SubmodularRankingGAM (already PWL, no distillation)
+    diversity_towers = []
+    groupwise_specs_out = []
+    if hasattr(model, "diversity_towers") and hasattr(model, "groupwise_specs"):
+        import torch
+
+        with torch.no_grad():
+            for k, (spec, tower) in enumerate(
+                zip(model.groupwise_specs, model.diversity_towers)
+            ):
+                slopes = tower.get_slopes().cpu().numpy().tolist()
+                knot_edges = tower.knot_edges.cpu().numpy().tolist()
+                knot_widths = tower.knot_widths.cpu().numpy().tolist()
+                diversity_towers.append(
+                    {
+                        "name": spec.get("name", f"diversity_{k}"),
+                        "x_min": float(tower.x_min),
+                        "x_max": float(tower.x_max),
+                        "intercept": float(tower.intercept.cpu()),
+                        "knot_edges": knot_edges,
+                        "knot_widths": knot_widths,
+                        "slopes": slopes,
+                    }
+                )
+                # Serialize spec (omit callable 'fn' for custom types)
+                spec_out = {
+                    k_: v
+                    for k_, v in spec.items()
+                    if k_ != "fn" and not callable(v)
+                }
+                groupwise_specs_out.append(spec_out)
+        print(f"  Diversity towers: {len(diversity_towers)} exported (already PWL)")
+
     return {
         "main_effects": main_pwl,
         "interactions": interaction_pwl,
         "bias": bias,
         "context_weights": [],
         "has_context": False,
+        "diversity_towers": diversity_towers,
+        "groupwise_specs": groupwise_specs_out,
     }
 
 
@@ -389,6 +425,8 @@ def save_pwl_json(pwl, path):
             for p in pwl.get("interactions", [])
         ],
         "context_weights": pwl.get("context_weights", []),
+        "diversity_towers": pwl.get("diversity_towers", []),
+        "groupwise_specs": pwl.get("groupwise_specs", []),
     }
     with open(path, "w") as f:
         json.dump(out, f)

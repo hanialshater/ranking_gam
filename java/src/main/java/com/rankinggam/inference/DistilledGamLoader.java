@@ -10,7 +10,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Loads a distilled GAM model from JSON produced by Python's {@code save_pwl_json()}.
+ * Loads distilled GAM models from JSON produced by Python's {@code save_pwl_json()}.
+ *
+ * <p>Supports both standard GAM models ({@link DistilledGamModel}) and submodular
+ * models with diversity towers ({@link ConcavePwlFunction}).
  *
  * <p>Expected JSON format:
  * <pre>
@@ -22,6 +25,11 @@ import java.util.List;
  *   ],
  *   "interactions": [
  *     {"features": [3, 7], "x1_grid": [...], "x2_grid": [...], "z": [[...], ...]},
+ *     ...
+ *   ],
+ *   "diversity_towers": [
+ *     {"intercept": 0.0, "x_min": 0.0, "x_max": 1.0,
+ *      "knot_edges": [...], "knot_widths": [...], "slopes": [...]},
  *     ...
  *   ]
  * }
@@ -97,6 +105,69 @@ public final class DistilledGamLoader {
         }
 
         return new DistilledGamModel(bias, mainEffects, interactions);
+    }
+
+    /**
+     * Parse diversity towers from JSON (for submodular reranking).
+     *
+     * @param root parsed JSON root node
+     * @return array of ConcavePwlFunction, empty if no diversity_towers present
+     */
+    static ConcavePwlFunction[] parseDiversityTowers(JsonNode root) {
+        JsonNode dtNode = root.get("diversity_towers");
+        if (dtNode == null || !dtNode.isArray() || dtNode.size() == 0) {
+            return new ConcavePwlFunction[0];
+        }
+
+        ConcavePwlFunction[] towers = new ConcavePwlFunction[dtNode.size()];
+        for (int i = 0; i < dtNode.size(); i++) {
+            JsonNode dt = dtNode.get(i);
+            double intercept = dt.get("intercept").asDouble();
+            double xMin = dt.get("x_min").asDouble();
+            double xMax = dt.get("x_max").asDouble();
+            double[] knotEdges = toDoubleArray(dt.get("knot_edges"));
+            double[] knotWidths = toDoubleArray(dt.get("knot_widths"));
+            double[] slopes = toDoubleArray(dt.get("slopes"));
+            towers[i] = new ConcavePwlFunction(intercept, knotEdges, knotWidths, slopes, xMin, xMax);
+        }
+        return towers;
+    }
+
+    /**
+     * Load model and diversity towers from a JSON file (for SubmodularGamReranker).
+     *
+     * @return parsed result containing the base model and diversity towers
+     */
+    public static SubmodularModelData loadSubmodular(File file) throws IOException {
+        JsonNode root = MAPPER.readTree(file);
+        return new SubmodularModelData(parseModel(root), parseDiversityTowers(root));
+    }
+
+    /**
+     * Load model and diversity towers from an input stream.
+     */
+    public static SubmodularModelData loadSubmodular(InputStream is) throws IOException {
+        JsonNode root = MAPPER.readTree(is);
+        return new SubmodularModelData(parseModel(root), parseDiversityTowers(root));
+    }
+
+    /**
+     * Load model and diversity towers from a JSON string.
+     */
+    public static SubmodularModelData loadSubmodularFromString(String json) throws IOException {
+        JsonNode root = MAPPER.readTree(json);
+        return new SubmodularModelData(parseModel(root), parseDiversityTowers(root));
+    }
+
+    /** Container for base model + diversity towers. */
+    public static final class SubmodularModelData {
+        public final DistilledGamModel baseModel;
+        public final ConcavePwlFunction[] diversityTowers;
+
+        SubmodularModelData(DistilledGamModel baseModel, ConcavePwlFunction[] diversityTowers) {
+            this.baseModel = baseModel;
+            this.diversityTowers = diversityTowers;
+        }
     }
 
     private static double[] toDoubleArray(JsonNode node) {
