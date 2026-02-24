@@ -249,7 +249,8 @@ def distill_to_pwl(model, num_knots=5, grid_size=30, train_X=None):
                 zip(model.groupwise_specs, model.diversity_towers)
             ):
                 slopes = tower.get_slopes().cpu().numpy().tolist()
-                knot_edges = tower.knot_edges.cpu().numpy().tolist()
+                # knot_edges has K+1 elements; forward() uses [0..K-1]
+                knot_edges = tower.knot_edges.cpu().numpy()[:-1].tolist()
                 knot_widths = tower.knot_widths.cpu().numpy().tolist()
                 diversity_towers.append(
                     {

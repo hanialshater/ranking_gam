@@ -6,11 +6,14 @@ This script trains a small GAM, distills it to PWL, and exports
 the model as JSON that can be loaded by the Java inference library.
 
 Usage:
-    # Export model JSON (trains a small GAM on synthetic data)
+    # Export standard GAM model
     python examples/demo_java_export.py
 
-    # Export from a specific dataset
-    python examples/demo_java_export.py --dataset mslr10k --epochs 10
+    # Export submodular GAM with diversity towers
+    python examples/demo_java_export.py --submodular
+
+    # Export GA2M with interactions
+    python examples/demo_java_export.py --ga2m
 
     # Then in Java:
     #   DistilledGamModel model = DistilledGamLoader.fromJson("gam_distilled.json");
@@ -42,13 +45,15 @@ def main():
                         help="include pairwise interactions (GA2M)")
     parser.add_argument("--ga2m-pairs", type=int, default=5,
                         help="number of interaction pairs (default: 5)")
+    parser.add_argument("--submodular", action="store_true",
+                        help="train SubmodularRankingGAM with diversity towers")
+    parser.add_argument("--diversity-epochs", type=int, default=5,
+                        help="diversity tower training epochs (default: 5)")
     args = parser.parse_args()
 
     import ranking_gam as rg
 
     num_features = args.num_features
-    print(f"Training GAM with {num_features} features, hidden={args.hidden}, "
-          f"epochs={args.epochs}")
 
     # Synthetic training data: [batch, list_size, num_features]
     np.random.seed(42)
@@ -65,8 +70,62 @@ def main():
     train_X, val_X = X[:n_train], X[n_train:]
     train_y, val_y = y[:n_train], y[n_train:]
 
-    # Build model
-    if args.ga2m:
+    import torch
+    from torch.utils.data import DataLoader, TensorDataset
+
+    train_ds = TensorDataset(torch.from_numpy(train_X), torch.from_numpy(train_y))
+    val_ds = TensorDataset(torch.from_numpy(val_X), torch.from_numpy(val_y))
+    train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
+    val_loader = DataLoader(val_ds, batch_size=32)
+
+    loss_fn = rg.LambdaLoss.ndcg2pp()
+
+    if args.submodular:
+        # ── SubmodularRankingGAM ──
+        # Use first 2 features as "category" and "brand" for diversity
+        # (In practice these would be actual categorical features)
+        groupwise_specs = [
+            {
+                "name": "category_novelty",
+                "type": "category_novelty",
+                "column": 0,
+                "x_min": 0.0,
+                "x_max": 1.0,
+            },
+            {
+                "name": "brand_novelty",
+                "type": "brand_novelty",
+                "column": 1,
+                "x_min": 0.0,
+                "x_max": 1.0,
+            },
+        ]
+
+        model = rg.SubmodularRankingGAM(
+            num_item_features=num_features,
+            groupwise_specs=groupwise_specs,
+            item_hidden=args.hidden,
+            num_knots=10,
+            activation="silu",
+            feature_transforms=True,
+            residual=True,
+        )
+        model.init_transforms_from_data(train_X)
+
+        print(f"Training SubmodularRankingGAM with {num_features} features, "
+              f"{len(groupwise_specs)} diversity towers, hidden={args.hidden}")
+
+        # Phase 1: Train base towers
+        print("\n--- Phase 1: Training base towers ---")
+        rg.train_model(model, train_loader, val_loader, loss_fn,
+                       epochs=args.epochs, lr_schedule="cosine")
+
+        # Phase 2: Train diversity towers
+        print("\n--- Phase 2: Training diversity towers ---")
+        # Diversity tower training expects numpy arrays
+        rg.train_diversity_towers(model, train_X, train_y, epochs=args.diversity_epochs)
+
+    elif args.ga2m:
         pairs = rg.select_interactions_correlation(
             train_X, top_k=args.ga2m_pairs)
         model = rg.GA2M_Paper(
@@ -77,7 +136,11 @@ def main():
             feature_transforms=True,
             residual=True,
         )
-        print(f"GA2M with {len(pairs)} interaction pairs")
+        model.init_transforms_from_data(train_X)
+        print(f"Training GA2M with {num_features} features, "
+              f"{len(pairs)} interaction pairs, hidden={args.hidden}")
+        rg.train_model(model, train_loader, val_loader, loss_fn,
+                       epochs=args.epochs, lr_schedule="cosine")
     else:
         model = rg.GAM_Paper(
             num_features=num_features,
@@ -86,21 +149,10 @@ def main():
             feature_transforms=True,
             residual=True,
         )
-
-    model.init_transforms_from_data(train_X)
-
-    # Train
-    import torch
-    from torch.utils.data import DataLoader, TensorDataset
-
-    train_ds = TensorDataset(torch.from_numpy(train_X), torch.from_numpy(train_y))
-    val_ds = TensorDataset(torch.from_numpy(val_X), torch.from_numpy(val_y))
-    train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
-    val_loader = DataLoader(val_ds, batch_size=32)
-
-    loss_fn = rg.LambdaLoss.ndcg2pp()
-    rg.train_model(model, train_loader, val_loader, loss_fn,
-                   epochs=args.epochs, lr_schedule="cosine")
+        model.init_transforms_from_data(train_X)
+        print(f"Training GAM with {num_features} features, hidden={args.hidden}")
+        rg.train_model(model, train_loader, val_loader, loss_fn,
+                       epochs=args.epochs, lr_schedule="cosine")
 
     # Distill
     print(f"\nDistilling to PWL with {args.num_knots} knots per feature...")
@@ -125,10 +177,28 @@ def main():
     print(f"\nExported to {args.output} ({size_kb:.1f} KB)")
     print(f"  Main effects: {len(data['main_effects'])}")
     print(f"  Interactions: {len(data['interactions'])}")
+    print(f"  Diversity towers: {len(data.get('diversity_towers', []))}")
     print(f"  Bias: {data['bias']:.6f}")
 
     # Show Java usage
-    print(f"""
+    if args.submodular:
+        print(f"""
+Java usage (submodular reranking):
+    // Load model + diversity towers
+    SubmodularModelData data = DistilledGamLoader.loadSubmodular("{args.output}");
+
+    // Provide your groupwise feature computer
+    GroupwiseFeatureComputer computer = new DefaultGroupwiseComputer(specs);
+
+    // Create reranker
+    SubmodularGamReranker reranker = new SubmodularGamReranker(
+        data.baseModel, data.diversityTowers, computer);
+
+    // Rerank with lazy greedy (Minoux), max 10 evals per position
+    int[] order = reranker.rerank(features, k, 10);
+""")
+    else:
+        print(f"""
 Java usage:
     DistilledGamModel model = DistilledGamLoader.fromJson("{args.output}");
     double score = model.scoreDocument(features);
