@@ -92,6 +92,46 @@ public final class BilinearGridFunction {
         return Math.max(min, Math.min(max, x));
     }
 
+    /**
+     * Bulk evaluate: add bilinear contributions into a scores accumulator.
+     * Column-major pattern — call once per interaction across all documents.
+     *
+     * @param x1Values  feature values for axis 1 (length >= count)
+     * @param x2Values  feature values for axis 2 (length >= count)
+     * @param scores    accumulator; contributions are ADDED in place
+     * @param count     number of elements to process
+     */
+    void evaluateAndAccumulate(double[] x1Values, double[] x2Values,
+                                double[] scores, int count) {
+        final double x1Lo = x1Grid[0], x1Hi = x1Grid[x1Grid.length - 1];
+        final double x2Lo = x2Grid[0], x2Hi = x2Grid[x2Grid.length - 1];
+
+        for (int idx = 0; idx < count; idx++) {
+            double x1 = x1Values[idx];
+            double x2 = x2Values[idx];
+
+            // Clamp
+            if (x1 < x1Lo) x1 = x1Lo;
+            else if (x1 > x1Hi) x1 = x1Hi;
+            if (x2 < x2Lo) x2 = x2Lo;
+            else if (x2 > x2Hi) x2 = x2Hi;
+
+            // Find cell
+            int i = findSegment(x1Grid, x1);
+            int j = findSegment(x2Grid, x2);
+
+            // Weights
+            double dx1 = x1Grid[i + 1] - x1Grid[i];
+            double s = dx1 < 1e-12 ? 0.0 : (x1 - x1Grid[i]) / dx1;
+            double dx2 = x2Grid[j + 1] - x2Grid[j];
+            double t = dx2 < 1e-12 ? 0.0 : (x2 - x2Grid[j]) / dx2;
+
+            // Bilinear
+            scores[idx] += (1 - s) * ((1 - t) * z[i][j] + t * z[i][j + 1])
+                         + s * ((1 - t) * z[i + 1][j] + t * z[i + 1][j + 1]);
+        }
+    }
+
     /** Feature indices for this interaction (e.g., [3, 7]). Stored externally in the model. */
     public int x1Size() {
         return x1Grid.length;

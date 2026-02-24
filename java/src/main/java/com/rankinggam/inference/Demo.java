@@ -51,43 +51,57 @@ public class Demo {
         }
         System.out.println("  Features: " + numFeatures);
 
-        // Score some random documents
-        int listSize = 10;
+        // Score some random documents (small list for display)
+        int displaySize = 10;
         java.util.Random rng = new java.util.Random(42);
-        double[][] docs = new double[listSize][numFeatures];
-        for (int i = 0; i < listSize; i++) {
+        double[][] docs = new double[displaySize][numFeatures];
+        for (int i = 0; i < displaySize; i++) {
             for (int j = 0; j < numFeatures; j++) {
                 docs[i][j] = rng.nextGaussian();
             }
         }
 
-        System.out.println("\nScoring " + listSize + " random documents:");
+        System.out.println("\nScoring " + displaySize + " random documents:");
         double[] scores = model.score(docs);
 
         // Sort by score descending
-        Integer[] indices = new Integer[listSize];
-        for (int i = 0; i < listSize; i++) indices[i] = i;
+        Integer[] indices = new Integer[displaySize];
+        for (int i = 0; i < displaySize; i++) indices[i] = i;
         Arrays.sort(indices, (a, b) -> Double.compare(scores[b], scores[a]));
 
         System.out.printf("  %-6s  %-12s  %s%n", "Rank", "Score", "Doc");
-        for (int rank = 0; rank < listSize; rank++) {
+        for (int rank = 0; rank < displaySize; rank++) {
             int idx = indices[rank];
             System.out.printf("  %-6d  %12.6f  doc_%d%n", rank + 1, scores[idx], idx);
         }
 
-        // Benchmark
-        int warmup = 1000;
-        int iterations = 100_000;
-        for (int i = 0; i < warmup; i++) model.score(docs);
+        // Benchmark at multiple list sizes
+        System.out.println("\n--- Benchmarks (compiled if/else + column-major scoring) ---");
 
-        long start = System.nanoTime();
-        for (int i = 0; i < iterations; i++) model.score(docs);
-        long elapsed = System.nanoTime() - start;
+        for (int listSize : new int[]{10, 100, 1000, 10_000}) {
+            rng = new java.util.Random(42);
+            double[][] bench = new double[listSize][numFeatures];
+            for (int i = 0; i < listSize; i++) {
+                for (int j = 0; j < numFeatures; j++) {
+                    bench[i][j] = rng.nextGaussian();
+                }
+            }
 
-        double usPerList = elapsed / 1000.0 / iterations;
-        double usPerDoc = usPerList / listSize;
-        System.out.printf("%nBenchmark (%d features, %d docs/list, %d iterations):%n",
-                numFeatures, listSize, iterations);
-        System.out.printf("  %.1f us/list, %.2f us/doc%n", usPerList, usPerDoc);
+            // Warmup
+            int warmup = Math.max(100, 10000 / listSize);
+            for (int i = 0; i < warmup; i++) model.score(bench);
+
+            // Timed iterations
+            int iterations = Math.max(100, 100000 / listSize);
+            long start = System.nanoTime();
+            for (int i = 0; i < iterations; i++) model.score(bench);
+            long elapsed = System.nanoTime() - start;
+
+            double usPerList = elapsed / 1000.0 / iterations;
+            double usPerDoc = usPerList / listSize;
+            double docsPerSec = listSize * iterations * 1e9 / elapsed;
+            System.out.printf("  %,6d docs: %8.1f us/list, %5.2f us/doc, %,.0f docs/sec%n",
+                    listSize, usPerList, usPerDoc, docsPerSec);
+        }
     }
 }

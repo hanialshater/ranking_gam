@@ -171,6 +171,81 @@ public class InferenceTest {
         }
     }
 
+    // ── CompiledPwlFunction tests ──
+
+    static void testCompiledMatchesPwl() {
+        // Test all knot counts K=1..7 — compiled must match PwlFunction exactly
+        double[][] xKnotsArr = {
+                {5.0},                              // K=1
+                {0, 1},                             // K=2
+                {0, 0.5, 1},                        // K=3
+                {0, 0.3, 0.7, 1},                   // K=4
+                {0, 0.2, 0.4, 0.7, 1},              // K=5
+                {0, 0.15, 0.3, 0.5, 0.75, 1},       // K=6
+                {0, 0.1, 0.25, 0.4, 0.6, 0.8, 1},   // K=7 (fallback)
+        };
+        double[][] yKnotsArr = {
+                {3.0},
+                {0, 2},
+                {0, 0.3, 1},
+                {0, 0.5, 0.5, 2},
+                {0, 0.1, 0.6, 0.8, 1.5},
+                {0, 0.1, 0.3, 0.7, 0.9, 1.2},
+                {0, 0.05, 0.2, 0.5, 0.7, 0.9, 1.0},
+        };
+        double[] testPoints = {-1, 0, 0.1, 0.25, 0.3, 0.5, 0.75, 0.9, 1.0, 2.0};
+
+        for (int ki = 0; ki < xKnotsArr.length; ki++) {
+            PwlFunction pwl = new PwlFunction(xKnotsArr[ki], yKnotsArr[ki]);
+            CompiledPwlFunction compiled = CompiledPwlFunction.compile(pwl);
+
+            for (double x : testPoints) {
+                double expected = pwl.evaluate(x);
+                double actual = compiled.evaluate(x);
+                assertEquals(expected, actual, 1e-12,
+                        "compiled K=" + xKnotsArr[ki].length + " at x=" + x);
+            }
+        }
+    }
+
+    static void testCompiledBulkAccumulate() {
+        PwlFunction pwl = new PwlFunction(
+                new double[]{0, 0.5, 1}, new double[]{0, 0.3, 1});
+        CompiledPwlFunction compiled = CompiledPwlFunction.compile(pwl);
+
+        double[] values = {-0.5, 0.0, 0.25, 0.5, 0.75, 1.0, 1.5};
+        double[] scores = new double[values.length];
+        compiled.evaluateAndAccumulate(values, scores, values.length);
+
+        for (int i = 0; i < values.length; i++) {
+            assertEquals(pwl.evaluate(values[i]), scores[i], 1e-12,
+                    "bulk accumulate at " + values[i]);
+        }
+    }
+
+    static void testColumnMajorScoring() throws Exception {
+        // Verify column-major model.score() matches row-major model.scoreDocument()
+        InputStream is = InferenceTest.class.getResourceAsStream("/test_model.json");
+        DistilledGamModel model = DistilledGamLoader.fromJson(is);
+        is.close();
+
+        java.util.Random rng = new java.util.Random(123);
+        int listSize = 50;
+        double[][] features = new double[listSize][3];
+        for (int i = 0; i < listSize; i++) {
+            for (int j = 0; j < 3; j++) {
+                features[i][j] = rng.nextGaussian();
+            }
+        }
+
+        double[] bulkScores = model.score(features);
+        for (int i = 0; i < listSize; i++) {
+            double singleScore = model.scoreDocument(features[i]);
+            assertEquals(singleScore, bulkScores[i], 1e-9,
+                    "column-major vs row-major doc " + i);
+        }
+    }
+
     // ── Cross-validation with Python ──
 
     static void testMatchesPythonPwlPredict() throws Exception {
@@ -202,6 +277,9 @@ public class InferenceTest {
         testGamOnlyModel();
         testJsonString();
         testScoreFinite();
+        testCompiledMatchesPwl();
+        testCompiledBulkAccumulate();
+        testColumnMajorScoring();
         testMatchesPythonPwlPredict();
 
         System.out.println("\n" + passed + " passed, " + failed + " failed");

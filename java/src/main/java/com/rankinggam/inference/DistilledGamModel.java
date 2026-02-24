@@ -1,5 +1,6 @@
 package com.rankinggam.inference;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -14,6 +15,10 @@ import java.util.List;
  * <p>Models are exported from Python via {@code save_pwl_json()} and loaded here
  * via {@link DistilledGamLoader}. The inference is pure arithmetic (no ML framework
  * dependencies), suitable for low-latency ranking services.
+ *
+ * <p>Performance: PWL lookups are compiled to flat if/else chains at load time
+ * (no loops or binary search for K<=6 knots). Bulk scoring uses column-major
+ * evaluation (feature-by-feature across all docs) for better cache utilization.
  *
  * <p>Usage:
  * <pre>
@@ -31,6 +36,13 @@ public final class DistilledGamModel {
     private final double bias;
     private final List<MainEffect> mainEffects;
     private final List<Interaction> interactions;
+
+    // Compiled structures for bulk scoring
+    private final CompiledPwlFunction[] compiledPwl;
+    private final int[] pwlFeatureIndices;
+    private final BilinearGridFunction[] interactionGrids;
+    private final int[] interactionF1;
+    private final int[] interactionF2;
 
     /**
      * A main-effect tower: one PWL function for feature index {@code featureIndex}.
@@ -84,6 +96,26 @@ public final class DistilledGamModel {
         this.bias = bias;
         this.mainEffects = Collections.unmodifiableList(mainEffects);
         this.interactions = Collections.unmodifiableList(interactions);
+
+        // Pre-compile PWL functions into if/else evaluators
+        this.compiledPwl = new CompiledPwlFunction[mainEffects.size()];
+        this.pwlFeatureIndices = new int[mainEffects.size()];
+        for (int j = 0; j < mainEffects.size(); j++) {
+            MainEffect me = mainEffects.get(j);
+            this.compiledPwl[j] = CompiledPwlFunction.compile(me.pwl);
+            this.pwlFeatureIndices[j] = me.featureIndex;
+        }
+
+        // Pre-extract interaction arrays for bulk access
+        this.interactionGrids = new BilinearGridFunction[interactions.size()];
+        this.interactionF1 = new int[interactions.size()];
+        this.interactionF2 = new int[interactions.size()];
+        for (int k = 0; k < interactions.size(); k++) {
+            Interaction ia = interactions.get(k);
+            this.interactionGrids[k] = ia.grid;
+            this.interactionF1[k] = ia.feature1;
+            this.interactionF2[k] = ia.feature2;
+        }
     }
 
     /**
@@ -95,12 +127,13 @@ public final class DistilledGamModel {
     public double scoreDocument(double[] features) {
         double score = bias;
 
-        for (MainEffect me : mainEffects) {
-            score += me.pwl.evaluate(features[me.featureIndex]);
+        for (int j = 0; j < compiledPwl.length; j++) {
+            score += compiledPwl[j].evaluate(features[pwlFeatureIndices[j]]);
         }
 
-        for (Interaction ia : interactions) {
-            score += ia.grid.evaluate(features[ia.feature1], features[ia.feature2]);
+        for (int k = 0; k < interactionGrids.length; k++) {
+            score += interactionGrids[k].evaluate(
+                    features[interactionF1[k]], features[interactionF2[k]]);
         }
 
         return score;
@@ -109,14 +142,44 @@ public final class DistilledGamModel {
     /**
      * Score a list of candidate documents for one query.
      *
+     * <p>Uses column-major evaluation: iterates feature-by-feature across all
+     * documents, using compiled if/else evaluators and bulk accumulation.
+     * This gives much better performance for large lists (1k-10k docs).
+     *
      * @param features [listSize][numFeatures] feature matrix
      * @return scores array of length listSize
      */
     public double[] score(double[][] features) {
-        double[] scores = new double[features.length];
-        for (int i = 0; i < features.length; i++) {
-            scores[i] = scoreDocument(features[i]);
+        final int listSize = features.length;
+        if (listSize == 0) return new double[0];
+
+        double[] scores = new double[listSize];
+        Arrays.fill(scores, bias);
+
+        // Column-major main effects: extract one feature column, evaluate across all docs
+        double[] column = new double[listSize];
+
+        for (int j = 0; j < compiledPwl.length; j++) {
+            final int fi = pwlFeatureIndices[j];
+            for (int i = 0; i < listSize; i++) {
+                column[i] = features[i][fi];
+            }
+            compiledPwl[j].evaluateAndAccumulate(column, scores, listSize);
         }
+
+        // Column-major interactions
+        if (interactionGrids.length > 0) {
+            double[] col2 = new double[listSize];
+            for (int k = 0; k < interactionGrids.length; k++) {
+                final int f1 = interactionF1[k], f2 = interactionF2[k];
+                for (int i = 0; i < listSize; i++) {
+                    column[i] = features[i][f1];
+                    col2[i] = features[i][f2];
+                }
+                interactionGrids[k].evaluateAndAccumulate(column, col2, scores, listSize);
+            }
+        }
+
         return scores;
     }
 
