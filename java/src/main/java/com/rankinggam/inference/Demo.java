@@ -76,7 +76,7 @@ public class Demo {
         }
 
         // Benchmark at multiple list sizes
-        System.out.println("\n--- Benchmarks (compiled if/else + column-major scoring) ---");
+        System.out.println("\n--- Benchmarks: score(double[][] rowMajor) ---");
 
         for (int listSize : new int[]{10, 100, 1000, 10_000}) {
             rng = new java.util.Random(42);
@@ -95,6 +95,33 @@ public class Demo {
             int iterations = Math.max(100, 100000 / listSize);
             long start = System.nanoTime();
             for (int i = 0; i < iterations; i++) model.score(bench);
+            long elapsed = System.nanoTime() - start;
+
+            double usPerList = elapsed / 1000.0 / iterations;
+            double usPerDoc = usPerList / listSize;
+            double docsPerSec = listSize * iterations * 1e9 / elapsed;
+            System.out.printf("  %,6d docs: %8.1f us/list, %5.2f us/doc, %,.0f docs/sec%n",
+                    listSize, usPerList, usPerDoc, docsPerSec);
+        }
+
+        // Benchmark columnar (SoA) input — no transpose needed
+        System.out.println("\n--- Benchmarks: scoreColumnar(double[][] columns) ---");
+
+        for (int listSize : new int[]{10, 100, 1000, 10_000}) {
+            rng = new java.util.Random(42);
+            double[][] columns = new double[numFeatures][listSize];
+            for (int j = 0; j < numFeatures; j++) {
+                for (int i = 0; i < listSize; i++) {
+                    columns[j][i] = rng.nextGaussian();
+                }
+            }
+
+            int warmup = Math.max(100, 10000 / listSize);
+            for (int i = 0; i < warmup; i++) model.scoreColumnar(columns, listSize);
+
+            int iterations = Math.max(100, 100000 / listSize);
+            long start = System.nanoTime();
+            for (int i = 0; i < iterations; i++) model.scoreColumnar(columns, listSize);
             long elapsed = System.nanoTime() - start;
 
             double usPerList = elapsed / 1000.0 / iterations;

@@ -184,6 +184,42 @@ public final class DistilledGamModel {
     }
 
     /**
+     * Score documents from column-major (Structure-of-Arrays) feature layout.
+     *
+     * <p>This is the fastest scoring path. When your ranking service already
+     * stores features per-column (e.g. one array per feature across all docs),
+     * use this method to skip the row-to-column transpose entirely.
+     *
+     * <p>Only columns referenced by the model's main effects and interactions
+     * need to be present. The {@code columns} map is indexed by feature index.
+     *
+     * @param columns  feature columns: columns[featureIndex] = double[numDocs]
+     * @param numDocs  number of documents to score
+     * @return scores array of length numDocs
+     */
+    public double[] scoreColumnar(double[][] columns, int numDocs) {
+        if (numDocs == 0) return new double[0];
+
+        double[] scores = new double[numDocs];
+        Arrays.fill(scores, bias);
+
+        // Main effects — columns already in the right layout, zero-copy
+        for (int j = 0; j < compiledPwl.length; j++) {
+            compiledPwl[j].evaluateAndAccumulate(
+                    columns[pwlFeatureIndices[j]], scores, numDocs);
+        }
+
+        // Interactions
+        for (int k = 0; k < interactionGrids.length; k++) {
+            interactionGrids[k].evaluateAndAccumulate(
+                    columns[interactionF1[k]], columns[interactionF2[k]],
+                    scores, numDocs);
+        }
+
+        return scores;
+    }
+
+    /**
      * Score a batch of queries, each with a list of candidate documents.
      *
      * @param batch [batchSize][listSize][numFeatures]

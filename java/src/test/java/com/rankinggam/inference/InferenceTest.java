@@ -246,6 +246,37 @@ public class InferenceTest {
         }
     }
 
+    static void testColumnarScoring() throws Exception {
+        // Verify scoreColumnar() matches score() (row-major input)
+        InputStream is = InferenceTest.class.getResourceAsStream("/test_model.json");
+        DistilledGamModel model = DistilledGamLoader.fromJson(is);
+        is.close();
+
+        java.util.Random rng = new java.util.Random(456);
+        int numDocs = 100;
+        int numFeatures = 3;
+
+        // Build row-major
+        double[][] rowMajor = new double[numDocs][numFeatures];
+        for (int i = 0; i < numDocs; i++)
+            for (int j = 0; j < numFeatures; j++)
+                rowMajor[i][j] = rng.nextGaussian();
+
+        // Build column-major (SoA)
+        double[][] columns = new double[numFeatures][numDocs];
+        for (int i = 0; i < numDocs; i++)
+            for (int j = 0; j < numFeatures; j++)
+                columns[j][i] = rowMajor[i][j];
+
+        double[] rowScores = model.score(rowMajor);
+        double[] colScores = model.scoreColumnar(columns, numDocs);
+
+        for (int i = 0; i < numDocs; i++) {
+            assertEquals(rowScores[i], colScores[i], 1e-9,
+                    "columnar vs row-major doc " + i);
+        }
+    }
+
     // ── Cross-validation with Python ──
 
     static void testMatchesPythonPwlPredict() throws Exception {
@@ -280,6 +311,7 @@ public class InferenceTest {
         testCompiledMatchesPwl();
         testCompiledBulkAccumulate();
         testColumnMajorScoring();
+        testColumnarScoring();
         testMatchesPythonPwlPredict();
 
         System.out.println("\n" + passed + " passed, " + failed + " failed");
