@@ -5,6 +5,7 @@ import com.rankinggam.inference.ConcavePwlFunction;
 import com.rankinggam.inference.DefaultGroupwiseComputer;
 import com.rankinggam.inference.DistilledGamModel;
 import com.rankinggam.inference.PwlFunction;
+import com.rankinggam.inference.FastSubmodularReranker;
 import com.rankinggam.inference.SubmodularGamReranker;
 
 import java.nio.file.Path;
@@ -132,8 +133,10 @@ public final class CompareBenchmark {
         // ── Submodular reranking benchmark ──
         if (withSubmodular) {
             System.out.println();
-            System.out.println("=== Submodular Reranking (Minoux lazy greedy) ===");
+            System.out.println("=== Submodular Reranking: Original vs Fast ===");
             System.out.println("  2 diversity towers (category_novelty, brand_novelty), k=40");
+            System.out.println("  Original: PriorityQueue<Candidate> + DefaultGroupwiseComputer (O(|S|) per eval)");
+            System.out.println("  Fast: array heap + incremental novelty counters (O(1) per eval)");
             System.out.println();
 
             // Synthetic concave diversity towers: slopes=[0.8, 0.4, 0.2, 0.1]
@@ -145,19 +148,25 @@ public final class CompareBenchmark {
             ConcavePwlFunction[] towers = {tower1, tower2};
 
             int catCol = 0, brandCol = Math.min(1, numFeatures - 1);
+
+            // Original reranker
             DefaultGroupwiseComputer.Spec[] specs = {
                 DefaultGroupwiseComputer.Spec.novelty("category_novelty", catCol),
                 DefaultGroupwiseComputer.Spec.novelty("brand_novelty", brandCol)
             };
             DefaultGroupwiseComputer computer = new DefaultGroupwiseComputer(specs);
-            SubmodularGamReranker reranker = new SubmodularGamReranker(optimizedModel, towers, computer);
+            SubmodularGamReranker original = new SubmodularGamReranker(optimizedModel, towers, computer);
+
+            // Fast reranker
+            int[] noveltyCols = {catCol, brandCol};
+            FastSubmodularReranker fast = new FastSubmodularReranker(optimizedModel, towers, noveltyCols);
 
             int k = 40;
             int numCategories = 5;
 
-            System.out.printf("%-8s | %-20s | %-20s%n", "Docs", "budget=10", "lazy-greedy");
-            System.out.printf("%-8s | %-20s | %-20s%n", "", "us/rerank", "us/rerank");
-            System.out.println("-".repeat(55));
+            System.out.printf("%-8s | %-22s | %-22s | %s%n",
+                    "Docs", "Original (us/rerank)", "Fast (us/rerank)", "Speedup");
+            System.out.println("-".repeat(72));
 
             for (int listSize : new int[]{100, 1_000, 10_000}) {
                 rng = new Random(42);
@@ -171,27 +180,33 @@ public final class CompareBenchmark {
                     }
                 }
 
+                // Precompute base scores for fast reranker
+                double[] baseScores = optimizedModel.score(docs);
+
                 // Warmup
-                for (int w = 0; w < 3; w++) {
-                    reranker.rerank(docs, k, 10);
-                    reranker.rerank(docs, k);
+                for (int w = 0; w < 5; w++) {
+                    original.rerank(docs, k);
+                    fast.rerank(docs, baseScores, k, 0);
                 }
 
                 int iters = Math.max(10, 1_000 / listSize);
 
-                // Budget=10
+                // Benchmark original
                 long t0 = System.nanoTime();
-                for (int i = 0; i < iters; i++) reranker.rerank(docs, k, 10);
-                long budgetNs = System.nanoTime() - t0;
-                double budgetUs = budgetNs / 1_000.0 / iters;
+                for (int i = 0; i < iters; i++) original.rerank(docs, k);
+                long origNs = System.nanoTime() - t0;
+                double origUs = origNs / 1_000.0 / iters;
 
-                // Unlimited (Minoux lazy greedy)
+                // Benchmark fast (with precomputed base scores)
                 t0 = System.nanoTime();
-                for (int i = 0; i < iters; i++) reranker.rerank(docs, k);
-                long lazyNs = System.nanoTime() - t0;
-                double lazyUs = lazyNs / 1_000.0 / iters;
+                for (int i = 0; i < iters; i++) fast.rerank(docs, baseScores, k, 0);
+                long fastNs = System.nanoTime() - t0;
+                double fastUs = fastNs / 1_000.0 / iters;
 
-                System.out.printf("%,8d | %,16.1f     | %,16.1f%n", listSize, budgetUs, lazyUs);
+                double speedup = (double) origNs / fastNs;
+
+                System.out.printf("%,8d | %,18.1f     | %,18.1f     | %.2fx%n",
+                        listSize, origUs, fastUs, speedup);
             }
         }
     }
