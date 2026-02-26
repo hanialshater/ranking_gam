@@ -6,6 +6,7 @@ import com.rankinggam.inference.DefaultGroupwiseComputer;
 import com.rankinggam.inference.DistilledGamModel;
 import com.rankinggam.inference.PwlFunction;
 import com.rankinggam.inference.FastSubmodularReranker;
+import com.rankinggam.inference.PageReranker;
 import com.rankinggam.inference.SubmodularGamReranker;
 
 import java.nio.file.Path;
@@ -210,6 +211,116 @@ public final class CompareBenchmark {
 
                 System.out.printf("%,8d | %,18.1f     | %,18.1f     | %.2fx%n",
                         listSize, origUs, fastUs, speedup);
+            }
+
+            // ── Page-Level Reranking Benchmark ──
+            System.out.println();
+            System.out.println("=== Page-Level Reranking (PageReranker: parallel greedy + boundary pass) ===");
+            System.out.println("  Page size=100, k=40, 2 diversity towers, budget=10 for boundary pass");
+            System.out.println();
+
+            PageReranker pageReranker = new PageReranker(optimizedModel, towers, noveltyCols);
+
+            // Single-page comparison: Fast/heap vs Page/flat at n=100
+            {
+                int listSize = 100;
+                rng = new Random(42);
+                double[][] docs = new double[listSize][numFeatures];
+                for (int i = 0; i < listSize; i++) {
+                    docs[i][catCol] = i % numCategories;
+                    docs[i][brandCol] = i % numBrands;
+                    for (int j = 0; j < numFeatures; j++) {
+                        if (j != catCol && j != brandCol)
+                            docs[i][j] = rng.nextGaussian() * 2.0;
+                    }
+                }
+                double[] baseScores = optimizedModel.score(docs);
+
+                int pageIters = 10_000;
+                // Warmup
+                for (int w = 0; w < 100; w++) {
+                    fast.rerank(docs, baseScores, k, 0);
+                    pageReranker.rerank(docs, baseScores, k);
+                }
+
+                long t0 = System.nanoTime();
+                for (int i = 0; i < pageIters; i++) fast.rerank(docs, baseScores, k, 0);
+                long fastNs = System.nanoTime() - t0;
+                double fastUs = fastNs / 1_000.0 / pageIters;
+
+                t0 = System.nanoTime();
+                for (int i = 0; i < pageIters; i++) pageReranker.rerank(docs, baseScores, k);
+                long pageNs = System.nanoTime() - t0;
+                double pageUs = pageNs / 1_000.0 / pageIters;
+
+                System.out.printf("Single page (n=100, k=40):%n");
+                System.out.printf("  Fast/heap:  %8.1f us/rerank%n", fastUs);
+                System.out.printf("  Page/rerank:%8.1f us/rerank  (%.2fx vs direct)%n",
+                        pageUs, fastUs / pageUs);
+            }
+
+            // Multi-page: 1000 items = 10 pages, parallel + boundary
+            {
+                int totalDocs = 1000;
+                int pageSize = 100;
+                int budget = 10;
+                rng = new Random(42);
+                double[][] docs = new double[totalDocs][numFeatures];
+                for (int i = 0; i < totalDocs; i++) {
+                    docs[i][catCol] = i % numCategories;
+                    docs[i][brandCol] = i % numBrands;
+                    for (int j = 0; j < numFeatures; j++) {
+                        if (j != catCol && j != brandCol)
+                            docs[i][j] = rng.nextGaussian() * 2.0;
+                    }
+                }
+                double[] baseScores = optimizedModel.score(docs);
+
+                int multiIters = 1000;
+                // Warmup
+                for (int w = 0; w < 10; w++) {
+                    pageReranker.rerankParallel(docs, baseScores, pageSize, k);
+                    pageReranker.rerankWithBoundaryPass(docs, baseScores, pageSize, k, budget);
+                }
+
+                // Serial heap (10 pages sequentially via FastSubmodularReranker)
+                long t0 = System.nanoTime();
+                for (int iter = 0; iter < multiIters; iter++) {
+                    for (int p = 0; p < 10; p++) {
+                        int start = p * pageSize;
+                        double[][] slice = new double[pageSize][];
+                        double[] sliceScores = new double[pageSize];
+                        System.arraycopy(docs, start, slice, 0, pageSize);
+                        System.arraycopy(baseScores, start, sliceScores, 0, pageSize);
+                        fast.rerank(slice, sliceScores, k, 0);
+                    }
+                }
+                long serialHeapNs = System.nanoTime() - t0;
+                double serialHeapUs = serialHeapNs / 1_000.0 / multiIters;
+
+                // Parallel per-page (pass 1 only)
+                t0 = System.nanoTime();
+                for (int iter = 0; iter < multiIters; iter++) {
+                    pageReranker.rerankParallel(docs, baseScores, pageSize, k);
+                }
+                long parallelNs = System.nanoTime() - t0;
+                double parallelUs = parallelNs / 1_000.0 / multiIters;
+
+                // Parallel + boundary refinement (pass 1 + pass 2)
+                t0 = System.nanoTime();
+                for (int iter = 0; iter < multiIters; iter++) {
+                    pageReranker.rerankWithBoundaryPass(docs, baseScores, pageSize, k, budget);
+                }
+                long boundaryNs = System.nanoTime() - t0;
+                double boundaryUs = boundaryNs / 1_000.0 / multiIters;
+
+                System.out.printf("%nMulti-page (1000 items = 10 pages of 100, k=40):%n");
+                System.out.printf("  Serial heap (10 pages): %8.1f us total  (%5.1f us/page)%n",
+                        serialHeapUs, serialHeapUs / 10);
+                System.out.printf("  Parallel per-page:      %8.1f us total  (%5.1f us/page, %.2fx vs serial)%n",
+                        parallelUs, parallelUs / 10, serialHeapUs / parallelUs);
+                System.out.printf("  + boundary (budget=%d):  %8.1f us total  (%5.1f us/page, %.2fx vs serial)%n",
+                        budget, boundaryUs, boundaryUs / 10, serialHeapUs / boundaryUs);
             }
         }
     }
