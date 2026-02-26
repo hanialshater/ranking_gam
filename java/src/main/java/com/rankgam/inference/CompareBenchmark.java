@@ -131,6 +131,71 @@ public final class CompareBenchmark {
                     listSize, normalUsDoc, normalDps, optRowUsDoc, optRowDps, optColUsDoc, optColDps, speedup);
         }
 
+        // ── LUT scoring benchmark ──
+        System.out.println();
+        System.out.println("=== LUT Scoring: branchless lookup-table PWL (256-entry) ===");
+        System.out.println("  LUT eliminates branch mispredictions; fused skips column extraction");
+        System.out.println();
+
+        {
+            // Correctness check: LUT vs compiled
+            double[] lutScores = optimizedModel.scoreLutFused(checkDocs);
+            double lutMaxDiff = 0;
+            for (int i = 0; i < 100; i++)
+                lutMaxDiff = Math.max(lutMaxDiff, Math.abs(optimizedScores[i] - lutScores[i]));
+            System.out.printf("LUT accuracy: max |compiled - LUT256| = %.4e%n%n", lutMaxDiff);
+
+            System.out.printf("%-8s | %-20s | %-20s | %-20s | %s%n",
+                    "Docs", "if/else columnar", "LUT columnar", "LUT fused row", "LUT speedup");
+            System.out.printf("%-8s | %-20s | %-20s | %-20s | %s%n",
+                    "", "us/doc", "us/doc", "us/doc", "col/fused");
+            System.out.println("-".repeat(100));
+
+            for (int listSize : listSizes) {
+                rng = new Random(42);
+                double[][] docs = randomDocs(rng, listSize, numFeatures);
+                double[][] columns = new double[numFeatures][listSize];
+                for (int j = 0; j < numFeatures; j++)
+                    for (int i = 0; i < listSize; i++)
+                        columns[j][i] = docs[i][j];
+
+                int warmup = Math.max(100, 10_000 / listSize);
+                int iters  = Math.max(100, 100_000 / listSize);
+
+                // Warmup
+                for (int w = 0; w < warmup; w++) {
+                    optimizedModel.scoreColumnar(columns, listSize);
+                    optimizedModel.scoreLut(columns, listSize);
+                    optimizedModel.scoreLutFused(docs);
+                }
+
+                // Benchmark if/else columnar (baseline)
+                long t0 = System.nanoTime();
+                for (int i = 0; i < iters; i++) optimizedModel.scoreColumnar(columns, listSize);
+                long ifelseNs = System.nanoTime() - t0;
+
+                // Benchmark LUT columnar
+                t0 = System.nanoTime();
+                for (int i = 0; i < iters; i++) optimizedModel.scoreLut(columns, listSize);
+                long lutColNs = System.nanoTime() - t0;
+
+                // Benchmark LUT fused row-major
+                t0 = System.nanoTime();
+                for (int i = 0; i < iters; i++) optimizedModel.scoreLutFused(docs);
+                long lutFusedNs = System.nanoTime() - t0;
+
+                long totalDocs = (long) iters * listSize;
+                double ifelseUs = ifelseNs / 1_000.0 / totalDocs;
+                double lutColUs = lutColNs / 1_000.0 / totalDocs;
+                double lutFusedUs = lutFusedNs / 1_000.0 / totalDocs;
+                double colSpeedup = (double) ifelseNs / lutColNs;
+                double fusedSpeedup = (double) ifelseNs / lutFusedNs;
+
+                System.out.printf("%,8d | %16.2f     | %16.2f     | %16.2f     | %.2fx / %.2fx%n",
+                        listSize, ifelseUs, lutColUs, lutFusedUs, colSpeedup, fusedSpeedup);
+            }
+        }
+
         // ── Submodular reranking benchmark ──
         if (withSubmodular) {
             System.out.println();
@@ -215,7 +280,7 @@ public final class CompareBenchmark {
 
             // ── Page-Level Reranking Benchmark ──
             System.out.println();
-            System.out.println("=== Page-Level Reranking (PageReranker: parallel greedy + boundary pass) ===");
+            System.out.println("=== Page-Level Reranking (PageReranker: per-page greedy + boundary pass) ===");
             System.out.println("  Page size=100, k=40, 2 diversity towers, budget=10 for boundary pass");
             System.out.println();
 
@@ -279,7 +344,7 @@ public final class CompareBenchmark {
                 int multiIters = 1000;
                 // Warmup
                 for (int w = 0; w < 10; w++) {
-                    pageReranker.rerankParallel(docs, baseScores, pageSize, k);
+                    pageReranker.rerankAllPages(docs, baseScores, pageSize, k);
                     pageReranker.rerankWithBoundaryPass(docs, baseScores, pageSize, k, budget);
                 }
 
@@ -298,15 +363,15 @@ public final class CompareBenchmark {
                 long serialHeapNs = System.nanoTime() - t0;
                 double serialHeapUs = serialHeapNs / 1_000.0 / multiIters;
 
-                // Parallel per-page (pass 1 only)
+                // Per-page greedy (pass 1 only)
                 t0 = System.nanoTime();
                 for (int iter = 0; iter < multiIters; iter++) {
-                    pageReranker.rerankParallel(docs, baseScores, pageSize, k);
+                    pageReranker.rerankAllPages(docs, baseScores, pageSize, k);
                 }
-                long parallelNs = System.nanoTime() - t0;
-                double parallelUs = parallelNs / 1_000.0 / multiIters;
+                long allPagesNs = System.nanoTime() - t0;
+                double allPagesUs = allPagesNs / 1_000.0 / multiIters;
 
-                // Parallel + boundary refinement (pass 1 + pass 2)
+                // Per-page + boundary refinement (pass 1 + pass 2)
                 t0 = System.nanoTime();
                 for (int iter = 0; iter < multiIters; iter++) {
                     pageReranker.rerankWithBoundaryPass(docs, baseScores, pageSize, k, budget);
@@ -317,8 +382,8 @@ public final class CompareBenchmark {
                 System.out.printf("%nMulti-page (1000 items = 10 pages of 100, k=40):%n");
                 System.out.printf("  Serial heap (10 pages): %8.1f us total  (%5.1f us/page)%n",
                         serialHeapUs, serialHeapUs / 10);
-                System.out.printf("  Parallel per-page:      %8.1f us total  (%5.1f us/page, %.2fx vs serial)%n",
-                        parallelUs, parallelUs / 10, serialHeapUs / parallelUs);
+                System.out.printf("  Per-page greedy:        %8.1f us total  (%5.1f us/page, %.2fx vs serial)%n",
+                        allPagesUs, allPagesUs / 10, serialHeapUs / allPagesUs);
                 System.out.printf("  + boundary (budget=%d):  %8.1f us total  (%5.1f us/page, %.2fx vs serial)%n",
                         budget, boundaryUs, boundaryUs / 10, serialHeapUs / boundaryUs);
             }

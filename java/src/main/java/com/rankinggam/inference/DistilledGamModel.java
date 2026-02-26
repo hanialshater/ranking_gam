@@ -44,6 +44,9 @@ public final class DistilledGamModel {
     private final int[] interactionF1;
     private final int[] interactionF2;
 
+    // LUT-based evaluators for branchless scoring
+    private final CompiledLutPwl[] lutPwl;
+
     /**
      * A main-effect tower: one PWL function for feature index {@code featureIndex}.
      */
@@ -104,6 +107,12 @@ public final class DistilledGamModel {
             MainEffect me = mainEffects.get(j);
             this.compiledPwl[j] = CompiledPwlFunction.compile(me.pwl);
             this.pwlFeatureIndices[j] = me.featureIndex;
+        }
+
+        // Pre-compile LUT evaluators for branchless scoring
+        this.lutPwl = new CompiledLutPwl[mainEffects.size()];
+        for (int j = 0; j < mainEffects.size(); j++) {
+            this.lutPwl[j] = CompiledLutPwl.compile(mainEffects.get(j).pwl);
         }
 
         // Pre-extract interaction arrays for bulk access
@@ -214,6 +223,82 @@ public final class DistilledGamModel {
             interactionGrids[k].evaluateAndAccumulate(
                     columns[interactionF1[k]], columns[interactionF2[k]],
                     scores, numDocs);
+        }
+
+        return scores;
+    }
+
+    // ── LUT-based scoring (branchless, no branch mispredictions) ──
+
+    /**
+     * Score documents from column-major layout using LUT-based branchless evaluators.
+     *
+     * <p>Same layout as {@link #scoreColumnar}, but uses lookup-table interpolation
+     * instead of if/else chains. The hot loop has zero data-dependent branches,
+     * which eliminates branch misprediction overhead.
+     *
+     * @param columns  feature columns: columns[featureIndex] = double[numDocs]
+     * @param numDocs  number of documents to score
+     * @return scores array of length numDocs
+     */
+    public double[] scoreLut(double[][] columns, int numDocs) {
+        if (numDocs == 0) return new double[0];
+
+        double[] scores = new double[numDocs];
+        Arrays.fill(scores, bias);
+
+        for (int j = 0; j < lutPwl.length; j++) {
+            lutPwl[j].evaluateAndAccumulate(
+                    columns[pwlFeatureIndices[j]], scores, numDocs);
+        }
+
+        // Interactions still use bilinear grid (not LUT-ifiable in 1D)
+        for (int k = 0; k < interactionGrids.length; k++) {
+            interactionGrids[k].evaluateAndAccumulate(
+                    columns[interactionF1[k]], columns[interactionF2[k]],
+                    scores, numDocs);
+        }
+
+        return scores;
+    }
+
+    /**
+     * Score documents from row-major layout using LUT-based branchless evaluators
+     * with fused column access (no temporary column buffer).
+     *
+     * <p>This combines two benefits:
+     * <ol>
+     *   <li>No column extraction step (reads directly from row-major features)
+     *   <li>Branchless evaluation (LUT interpolation, no if/else chains)
+     * </ol>
+     *
+     * @param features [listSize][numFeatures] feature matrix
+     * @return scores array of length listSize
+     */
+    public double[] scoreLutFused(double[][] features) {
+        final int listSize = features.length;
+        if (listSize == 0) return new double[0];
+
+        double[] scores = new double[listSize];
+        Arrays.fill(scores, bias);
+
+        for (int j = 0; j < lutPwl.length; j++) {
+            lutPwl[j].evaluateFromRows(features, pwlFeatureIndices[j],
+                                        scores, listSize);
+        }
+
+        // Interactions: still need column extraction for bilinear grid
+        if (interactionGrids.length > 0) {
+            double[] col1 = new double[listSize];
+            double[] col2 = new double[listSize];
+            for (int k = 0; k < interactionGrids.length; k++) {
+                final int f1 = interactionF1[k], f2 = interactionF2[k];
+                for (int i = 0; i < listSize; i++) {
+                    col1[i] = features[i][f1];
+                    col2[i] = features[i][f2];
+                }
+                interactionGrids[k].evaluateAndAccumulate(col1, col2, scores, listSize);
+            }
         }
 
         return scores;

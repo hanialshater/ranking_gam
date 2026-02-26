@@ -1,7 +1,6 @@
 package com.rankinggam.inference;
 
 import java.util.Arrays;
-import java.util.stream.IntStream;
 
 /**
  * Hierarchical parallel greedy reranker for paginated results.
@@ -11,10 +10,9 @@ import java.util.stream.IntStream;
  *
  * <h3>Two-pass approach:</h3>
  * <ol>
- *   <li><b>Pass 1 — Per-page greedy (parallel):</b> Each page is reranked
+ *   <li><b>Pass 1 — Per-page greedy:</b> Each page is reranked
  *       independently using {@link FastSubmodularReranker}'s lazy greedy heap.
- *       All pages process in parallel via ForkJoinPool. Items stay within their
- *       page — a page-0 item can't migrate to page 5.
+ *       Items stay within their page — a page-0 item can't migrate to page 5.
  *   <li><b>Pass 2 — Boundary refinement (sequential, budget-limited):</b>
  *       For each boundary between adjacent pages, takes the last {@code budget}
  *       items of page p and the first {@code budget} of page p+1, and re-runs
@@ -26,7 +24,7 @@ import java.util.stream.IntStream;
  * <h3>Methods:</h3>
  * <ul>
  *   <li>{@link #rerank} — single page (delegates to FastSubmodularReranker)
- *   <li>{@link #rerankParallel} — pass 1 only: parallel per-page greedy
+ *   <li>{@link #rerankAllPages} — pass 1 only: per-page greedy
  *   <li>{@link #rerankWithBoundaryPass} — pass 1 + pass 2
  * </ul>
  */
@@ -110,10 +108,10 @@ public final class PageReranker {
         return rerank(features, baseModel.score(features), k);
     }
 
-    // ── Pass 1: Parallel per-page greedy ──
+    // ── Pass 1: Per-page greedy ──
 
     /**
-     * Split items into pages and run greedy within each page in parallel.
+     * Split items into pages and run greedy within each page.
      *
      * <p>Items are assumed to be pre-sorted by relevance (page 0 = most relevant).
      * Each page is reranked independently — items stay within their page.
@@ -124,13 +122,13 @@ public final class PageReranker {
      * @param k          items to select per page
      * @return flattened ordering with global indices
      */
-    public int[] rerankParallel(double[][] features, double[] baseScores,
+    public int[] rerankAllPages(double[][] features, double[] baseScores,
                                 int pageSize, int k) {
         final int totalDocs = features.length;
         final int numPages = (totalDocs + pageSize - 1) / pageSize;
         int[][] pageResults = new int[numPages][];
 
-        IntStream.range(0, numPages).parallel().forEach(p -> {
+        for (int p = 0; p < numPages; p++) {
             int start = p * pageSize;
             int end = Math.min(start + pageSize, totalDocs);
             int pageLen = end - start;
@@ -144,10 +142,10 @@ public final class PageReranker {
                 pageScores[i] = baseScores[start + i];
             }
 
-            // Each thread gets its own reranker instance (thread-safe)
-            FastSubmodularReranker fast = new FastSubmodularReranker(
+            // Fresh instance per page: auto-detected maxCategoryValues vary per page
+            FastSubmodularReranker pageRanker = new FastSubmodularReranker(
                     baseModel, diversityTowers, noveltyColumns, maxCategoryValues);
-            int[] localOrder = fast.rerank(pageFeat, pageScores, pageK, 0);
+            int[] localOrder = pageRanker.rerank(pageFeat, pageScores, pageK, 0);
 
             // Convert local indices to global
             int[] globalOrder = new int[localOrder.length];
@@ -155,16 +153,16 @@ public final class PageReranker {
                 globalOrder[i] = localOrder[i] + start;
             }
             pageResults[p] = globalOrder;
-        });
+        }
 
         return flatten(pageResults);
     }
 
     /**
-     * Rerank parallel, computing base scores internally.
+     * Rerank all pages, computing base scores internally.
      */
-    public int[] rerankParallel(double[][] features, int pageSize, int k) {
-        return rerankParallel(features, baseModel.score(features), pageSize, k);
+    public int[] rerankAllPages(double[][] features, int pageSize, int k) {
+        return rerankAllPages(features, baseModel.score(features), pageSize, k);
     }
 
     // ── Pass 2: Cross-page boundary refinement ──
@@ -190,7 +188,7 @@ public final class PageReranker {
     public int[] rerankWithBoundaryPass(double[][] features, double[] baseScores,
                                         int pageSize, int k, int budget) {
         // Pass 1
-        int[] fullOrder = rerankParallel(features, baseScores, pageSize, k);
+        int[] fullOrder = rerankAllPages(features, baseScores, pageSize, k);
 
         if (budget <= 0) return fullOrder;
 

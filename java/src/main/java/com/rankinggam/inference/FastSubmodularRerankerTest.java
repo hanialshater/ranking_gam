@@ -50,6 +50,13 @@ public final class FastSubmodularRerankerTest {
         testPageRerankerBoundaryPassImprovesDiversity();
         testPageRerankerLargeParallel();
 
+        // CompiledLutPwl tests
+        testLutAccuracy256();
+        testLutAccuracy1024();
+        testLutBulkMatchesSingle();
+        testLutFusedMatchesColumnar();
+        testLutOutOfRange();
+
         System.out.println();
         System.out.printf("Results: %d passed, %d failed, %d total%n",
                 passed, failed, passed + failed);
@@ -577,7 +584,7 @@ public final class FastSubmodularRerankerTest {
         int k = 40;
 
         // Parallel result
-        int[] parallelResult = page.rerankParallel(features, baseScores, pageSize, k);
+        int[] parallelResult = page.rerankAllPages(features, baseScores, pageSize, k);
 
         // Serial: manually run per-page
         int[] serialResult = new int[3 * k];
@@ -610,7 +617,7 @@ public final class FastSubmodularRerankerTest {
         double[][] features = makeFeatures(rng, 200, 10, 0, 5, 1, 3);
         double[] baseScores = model.score(features);
 
-        int[] parallelOnly = page.rerankParallel(features, baseScores, 100, 40);
+        int[] parallelOnly = page.rerankAllPages(features, baseScores, 100, 40);
         int[] withBudget0 = page.rerankWithBoundaryPass(features, baseScores, 100, 40, 0);
 
         check("budget=0: identical to parallel-only",
@@ -645,7 +652,7 @@ public final class FastSubmodularRerankerTest {
         int k = 20; // select all within each page
         int budget = 5;
 
-        int[] withoutBoundary = page.rerankParallel(features, baseScores, pageSize, k);
+        int[] withoutBoundary = page.rerankAllPages(features, baseScores, pageSize, k);
         int[] withBoundary = page.rerankWithBoundaryPass(features, baseScores, pageSize, k, budget);
 
         // Both should be same length
@@ -692,5 +699,144 @@ public final class FastSubmodularRerankerTest {
         // Verify deterministic: run again
         int[] result2 = page.rerankWithBoundaryPass(features, baseScores, 100, 40, 10);
         check("large: deterministic across runs", Arrays.equals(result, result2));
+    }
+
+    // ── CompiledLutPwl tests ──
+
+    private static void testLutAccuracy256() {
+        System.out.println("testLutAccuracy256 (LUT vs if/else, 256 entries)");
+        // Use a K=5 PWL (typical GAM tower)
+        PwlFunction pwl = new PwlFunction(
+                new double[]{-2.0, -0.5, 0.3, 1.2, 3.0},
+                new double[]{-1.5,  0.2, 0.8, 0.5, 2.1});
+        CompiledPwlFunction compiled = CompiledPwlFunction.compile(pwl);
+        CompiledLutPwl lut = CompiledLutPwl.compile(pwl, 256);
+
+        Random rng = new Random(42);
+        double maxDiff = 0;
+        for (int i = 0; i < 10000; i++) {
+            double x = rng.nextGaussian() * 3.0; // some outside range
+            double expected = compiled.evaluate(x);
+            double actual = lut.evaluate(x);
+            maxDiff = Math.max(maxDiff, Math.abs(expected - actual));
+        }
+
+        System.out.printf("    max |compiled - LUT256| = %.6f%n", maxDiff);
+        check("LUT256: max error < 0.05", maxDiff < 0.05);
+    }
+
+    private static void testLutAccuracy1024() {
+        System.out.println("testLutAccuracy1024 (LUT vs if/else, 1024 entries)");
+        PwlFunction pwl = new PwlFunction(
+                new double[]{-2.0, -0.5, 0.3, 1.2, 3.0},
+                new double[]{-1.5,  0.2, 0.8, 0.5, 2.1});
+        CompiledPwlFunction compiled = CompiledPwlFunction.compile(pwl);
+        CompiledLutPwl lut = CompiledLutPwl.compile(pwl, 1024);
+
+        Random rng = new Random(42);
+        double maxDiff = 0;
+        for (int i = 0; i < 10000; i++) {
+            double x = rng.nextGaussian() * 3.0;
+            double expected = compiled.evaluate(x);
+            double actual = lut.evaluate(x);
+            maxDiff = Math.max(maxDiff, Math.abs(expected - actual));
+        }
+
+        System.out.printf("    max |compiled - LUT1024| = %.6f%n", maxDiff);
+        check("LUT1024: max error < 0.01", maxDiff < 0.01);
+    }
+
+    private static void testLutBulkMatchesSingle() {
+        System.out.println("testLutBulkMatchesSingle (bulk accumulate matches single eval)");
+        PwlFunction pwl = new PwlFunction(
+                new double[]{0.0, 1.0, 2.0, 3.0, 4.0},
+                new double[]{0.0, 0.5, 1.5, 1.0, 2.0});
+        CompiledLutPwl lut = CompiledLutPwl.compile(pwl, 256);
+
+        Random rng = new Random(123);
+        int n = 500;
+        double[] values = new double[n];
+        for (int i = 0; i < n; i++) values[i] = rng.nextDouble() * 5.0 - 0.5;
+
+        // Single evaluation
+        double[] expectedScores = new double[n];
+        for (int i = 0; i < n; i++) expectedScores[i] = lut.evaluate(values[i]);
+
+        // Bulk evaluation
+        double[] bulkScores = new double[n];
+        lut.evaluateAndAccumulate(values, bulkScores, n);
+
+        double maxDiff = 0;
+        for (int i = 0; i < n; i++)
+            maxDiff = Math.max(maxDiff, Math.abs(expectedScores[i] - bulkScores[i]));
+
+        check("LUT bulk matches single: max diff < 1e-12", maxDiff < 1e-12);
+    }
+
+    private static void testLutFusedMatchesColumnar() {
+        System.out.println("testLutFusedMatchesColumnar (scoreLutFused vs scoreLut)");
+        DistilledGamModel model = makeSimpleModel(10);
+        Random rng = new Random(456);
+        int n = 200;
+        double[][] features = new double[n][10];
+        for (int i = 0; i < n; i++)
+            for (int j = 0; j < 10; j++)
+                features[i][j] = rng.nextGaussian() * 2.0;
+
+        // Columnar layout
+        double[][] columns = new double[10][n];
+        for (int j = 0; j < 10; j++)
+            for (int i = 0; i < n; i++)
+                columns[j][i] = features[i][j];
+
+        double[] lutColumnar = model.scoreLut(columns, n);
+        double[] lutFused = model.scoreLutFused(features);
+
+        double maxDiff = 0;
+        for (int i = 0; i < n; i++)
+            maxDiff = Math.max(maxDiff, Math.abs(lutColumnar[i] - lutFused[i]));
+
+        check("LUT fused matches columnar: max diff < 1e-12", maxDiff < 1e-12);
+
+        // Also check vs original score()
+        double[] origScores = model.score(features);
+        double maxDiffVsOrig = 0;
+        for (int i = 0; i < n; i++)
+            maxDiffVsOrig = Math.max(maxDiffVsOrig, Math.abs(origScores[i] - lutFused[i]));
+
+        System.out.printf("    max |score() - scoreLutFused()| = %.6f%n", maxDiffVsOrig);
+        check("LUT fused vs original: max diff < 0.1", maxDiffVsOrig < 0.1);
+    }
+
+    private static void testLutOutOfRange() {
+        System.out.println("testLutOutOfRange (values far outside knot range)");
+        PwlFunction pwl = new PwlFunction(
+                new double[]{0.0, 1.0, 2.0},
+                new double[]{1.0, 3.0, 2.0});
+        CompiledPwlFunction compiled = CompiledPwlFunction.compile(pwl);
+        CompiledLutPwl lut = CompiledLutPwl.compile(pwl, 256);
+
+        // Far below range
+        double belowCompiled = compiled.evaluate(-100.0);
+        double belowLut = lut.evaluate(-100.0);
+        check("LUT below range matches compiled",
+                Math.abs(belowCompiled - belowLut) < 1e-10);
+
+        // Far above range
+        double aboveCompiled = compiled.evaluate(100.0);
+        double aboveLut = lut.evaluate(100.0);
+        check("LUT above range matches compiled",
+                Math.abs(aboveCompiled - aboveLut) < 1e-10);
+
+        // Exactly at boundaries
+        double atMinCompiled = compiled.evaluate(0.0);
+        double atMinLut = lut.evaluate(0.0);
+        check("LUT at min boundary matches compiled",
+                Math.abs(atMinCompiled - atMinLut) < 1e-10);
+
+        double atMaxCompiled = compiled.evaluate(2.0);
+        double atMaxLut = lut.evaluate(2.0);
+        check("LUT at max boundary matches compiled",
+                Math.abs(atMaxCompiled - atMaxLut) < 1e-10);
     }
 }
