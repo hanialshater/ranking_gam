@@ -4,6 +4,7 @@ from .pwl import (
     distill_context_model,
     distill_to_pwl,
     evaluate_pwl,
+    export_pwl_to_json,
     greedy_knot_selection,
     pwl_predict,
 )
@@ -14,4 +15,5 @@ __all__ = [
     "distill_context_model",
     "pwl_predict",
     "evaluate_pwl",
+    "export_pwl_to_json",
 ]

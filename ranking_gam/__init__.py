@@ -62,6 +62,7 @@ def __getattr__(name):
         "distill_context_model": (".distill", "distill_context_model"),
         "pwl_predict": (".distill", "pwl_predict"),
         "evaluate_pwl": (".distill", "evaluate_pwl"),
+        "export_pwl_to_json": (".distill", "export_pwl_to_json"),
         # Data
         "load_mslr": (".data", "load_mslr"),
         "load_mslr30k": (".data", "load_mslr30k"),
@@ -142,6 +143,7 @@ __all__ = [
     "distill_context_model",
     "pwl_predict",
     "evaluate_pwl",
+    "export_pwl_to_json",
     # Data
     "load_mslr",
     "load_mslr30k",

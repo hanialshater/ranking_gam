@@ -11,6 +11,8 @@ Steps:
   4. y-values via least squares
 """
 
+import json
+
 import numpy as np
 
 
@@ -363,6 +365,51 @@ def pwl_predict(pwl, X, q=None):
         scores += interp(np.stack([x1, x2], axis=-1)).reshape(batch_size, list_size)
 
     return scores
+
+
+def export_pwl_to_json(pwl, path):
+    """
+    Export a distilled PWL model to JSON for Java inference.
+
+    The JSON format matches what ``PwlModelLoader.java`` expects:
+
+    .. code-block:: json
+
+        {
+            "bias": 0.123,
+            "main_effects": [
+                {"feature": 0, "x": [...], "y": [...]},
+                ...
+            ],
+            "interactions": [
+                {"features": [3, 7], "x1_grid": [...], "x2_grid": [...], "z": [[...]]},
+                ...
+            ]
+        }
+
+    Args:
+        pwl: distilled model dict from ``distill_to_pwl`` or ``distill_context_model``
+        path: output file path (str or Path)
+    """
+    out = {
+        "bias": pwl["bias"],
+        "main_effects": [
+            {"feature": e["feature"], "x": e["x"], "y": e["y"]}
+            for e in pwl["main_effects"]
+        ],
+        "interactions": [
+            {
+                "features": list(e["features"]),
+                "x1_grid": e["x1_grid"],
+                "x2_grid": e["x2_grid"],
+                "z": e["z"],
+            }
+            for e in pwl["interactions"]
+        ],
+    }
+    with open(path, "w") as f:
+        json.dump(out, f)
+    print(f"  Exported PWL model to {path}")
 
 
 def evaluate_pwl(pwl, X, y, q=None, k=10):
