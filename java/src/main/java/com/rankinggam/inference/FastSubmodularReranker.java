@@ -1,23 +1,24 @@
 package com.rankinggam.inference;
 
+import java.util.Arrays;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Map;
-import java.util.Set;
 
 /**
- * Optimized submodular reranker: allocation-free heap, incremental groupwise state.
+ * Optimized submodular reranker: compiled towers, array counters, allocation-free heap.
  *
  * <p>Improvements over {@link SubmodularGamReranker}:
  * <ul>
+ *   <li><b>Compiled diversity towers</b> — {@link CompiledConcavePwl} inlines all knot
+ *       parameters as JIT constants (flat if/else, no loops for K<=6).
+ *   <li><b>Int-array novelty counters</b> — when category values are small non-negative
+ *       integers, uses {@code int[maxCat+1]} instead of HashMap for O(1) indexed lookup.
+ *       Falls back to HashMap for non-integer or unknown-cardinality features.
  *   <li><b>Array-based max-heap</b> — no Candidate objects, no GC pressure.
  *       Uses parallel double[]/int[] arrays for gain and index, with inline
  *       sift-up/sift-down.
  *   <li><b>Precomputed base scores</b> — computed once and reused. Accepts
  *       external scores or computes via the model.
- *   <li><b>Incremental novelty state</b> — for category/brand novelty features,
- *       maintains a running count map per category. Computing novelty for a
- *       candidate is O(numTowers) instead of O(|S| * numTowers).
  *   <li><b>Fixed-size selected array</b> — no per-step array allocation.
  * </ul>
  *
@@ -28,32 +29,64 @@ import java.util.Set;
 public final class FastSubmodularReranker {
 
     private final DistilledGamModel baseModel;
-    private final ConcavePwlFunction[] diversityTowers;
+    private final CompiledConcavePwl.ConcaveEval[] compiledTowers;
     private final double maxDiversityScore;
 
     // Novelty tower config: for each tower, which feature column to check
     private final int numTowers;
     private final int[] noveltyColumns;   // -1 if tower is not novelty-type
 
+    // Int-array counter config: per tower, max category value for array indexing.
+    // -1 means use HashMap fallback.
+    private final int[] maxCategoryValues;
+
     /**
+     * Construct with compiled diversity towers and optional int-array counter hints.
+     *
+     * @param baseModel         base GAM scoring model
+     * @param diversityTowers   concave PWL diversity towers
+     * @param noveltyColumns    per-tower: feature column index for novelty, or -1 if not novelty
+     * @param maxCategoryValues per-tower: max integer category value for array counters, or -1 for HashMap fallback
+     */
+    public FastSubmodularReranker(DistilledGamModel baseModel,
+                                   ConcavePwlFunction[] diversityTowers,
+                                   int[] noveltyColumns,
+                                   int[] maxCategoryValues) {
+        this.baseModel = baseModel;
+        this.numTowers = diversityTowers.length;
+        this.noveltyColumns = noveltyColumns.clone();
+        this.maxCategoryValues = maxCategoryValues.clone();
+
+        // Compile towers
+        this.compiledTowers = new CompiledConcavePwl.ConcaveEval[numTowers];
+        double maxDiv = 0;
+        for (int t = 0; t < numTowers; t++) {
+            CompiledConcavePwl compiled = CompiledConcavePwl.compile(diversityTowers[t]);
+            this.compiledTowers[t] = compiled.evaluator();
+            maxDiv += compiled.evaluateAtMax();
+        }
+        this.maxDiversityScore = maxDiv;
+    }
+
+    /**
+     * Backward-compatible constructor. Auto-detects integer category values from
+     * the first rerank call (uses HashMap until then, then switches to array counters
+     * if values are small non-negative integers). For simplicity, always uses HashMap.
+     *
      * @param baseModel       base GAM scoring model
      * @param diversityTowers concave PWL diversity towers
-     * @param noveltyColumns  per-tower: feature column index for novelty, or -1 if not novelty.
-     *                        Length must equal diversityTowers.length.
+     * @param noveltyColumns  per-tower: feature column index for novelty, or -1 if not novelty
      */
     public FastSubmodularReranker(DistilledGamModel baseModel,
                                    ConcavePwlFunction[] diversityTowers,
                                    int[] noveltyColumns) {
-        this.baseModel = baseModel;
-        this.diversityTowers = diversityTowers;
-        this.numTowers = diversityTowers.length;
-        this.noveltyColumns = noveltyColumns.clone();
+        this(baseModel, diversityTowers, noveltyColumns, defaultMaxCats(diversityTowers.length));
+    }
 
-        double maxDiv = 0;
-        for (ConcavePwlFunction tower : diversityTowers) {
-            maxDiv += tower.evaluateAtMax();
-        }
-        this.maxDiversityScore = maxDiv;
+    private static int[] defaultMaxCats(int numTowers) {
+        int[] maxCats = new int[numTowers];
+        Arrays.fill(maxCats, -1); // HashMap fallback
+        return maxCats;
     }
 
     /**
@@ -71,8 +104,51 @@ public final class FastSubmodularReranker {
         k = Math.min(k, n);
         if (maxEvalsPerPos <= 0) maxEvalsPerPos = n;
 
+        // ── Pre-extract category values as int arrays ──
+        // For towers using array counters, extract category ints from features once.
+        // For HashMap towers, extract long keys once.
+        int[][] catInts = new int[numTowers][];   // only for array-counter towers
+        long[][] catLongs = new long[numTowers][]; // only for HashMap towers
+        for (int t = 0; t < numTowers; t++) {
+            if (noveltyColumns[t] < 0) continue;
+            int col = noveltyColumns[t];
+            if (maxCategoryValues[t] >= 0) {
+                // Array counter: extract as int
+                catInts[t] = new int[n];
+                for (int i = 0; i < n; i++) {
+                    catInts[t][i] = (int) features[i][col];
+                }
+            } else {
+                // HashMap: auto-detect if values are small non-negative integers
+                boolean allSmallInt = true;
+                int maxVal = 0;
+                for (int i = 0; i < n; i++) {
+                    double v = features[i][col];
+                    int iv = (int) v;
+                    if (v != iv || iv < 0 || iv > 10_000) {
+                        allSmallInt = false;
+                        break;
+                    }
+                    if (iv > maxVal) maxVal = iv;
+                }
+                if (allSmallInt) {
+                    // Upgrade to array counter
+                    catInts[t] = new int[n];
+                    for (int i = 0; i < n; i++) {
+                        catInts[t][i] = (int) features[i][col];
+                    }
+                    // Store max for counter allocation (use local override)
+                    maxCategoryValues[t] = maxVal;
+                } else {
+                    catLongs[t] = new long[n];
+                    for (int i = 0; i < n; i++) {
+                        catLongs[t][i] = Double.doubleToRawLongBits(features[i][col]);
+                    }
+                }
+            }
+        }
+
         // ── Array-based max-heap ──
-        // heapGain[i] = gain value, heapIdx[i] = document index, heapStep[i] = computedAtStep
         double[] heapGain = new double[n];
         int[] heapIdx = new int[n];
         int[] heapStep = new int[n];
@@ -86,13 +162,16 @@ public final class FastSubmodularReranker {
             siftUp(heapGain, heapIdx, heapStep, heapSize - 1);
         }
 
-        // ── Incremental novelty state ──
-        // For each novelty tower, map from category value -> count in selected set
+        // ── Novelty counters ──
+        int[][] arrayCounters = new int[numTowers][];
         @SuppressWarnings("unchecked")
-        Map<Long, Integer>[] noveltyCounts = new HashMap[numTowers];
+        Map<Long, Integer>[] mapCounters = new HashMap[numTowers];
         for (int t = 0; t < numTowers; t++) {
-            if (noveltyColumns[t] >= 0) {
-                noveltyCounts[t] = new HashMap<>();
+            if (noveltyColumns[t] < 0) continue;
+            if (catInts[t] != null) {
+                arrayCounters[t] = new int[maxCategoryValues[t] + 1];
+            } else {
+                mapCounters[t] = new HashMap<>();
             }
         }
 
@@ -102,12 +181,11 @@ public final class FastSubmodularReranker {
 
         for (int step = 0; step < k; step++) {
             int evals = 0;
-            int bestHeapPos = -1;
+            boolean found = false;
 
             while (heapSize > 0) {
                 // Pop top
                 int topIdx = heapIdx[0];
-                double topGain = heapGain[0];
                 int topStep = heapStep[0];
 
                 // Remove from heap
@@ -122,59 +200,46 @@ public final class FastSubmodularReranker {
                 if (inSelected[topIdx]) continue;
 
                 if (topStep == step) {
-                    // True best — put it back temporarily so we can find it
-                    // Actually we already popped it, just record it
+                    // True best for this step
                     selected[step] = topIdx;
-                    bestHeapPos = 0; // sentinel: found
-                    // Update incremental state
+                    found = true;
+                    updateCounters(topIdx, catInts, catLongs, arrayCounters, mapCounters);
                     inSelected[topIdx] = true;
                     selectedCount++;
-                    for (int t = 0; t < numTowers; t++) {
-                        if (noveltyColumns[t] >= 0) {
-                            long cat = Double.doubleToRawLongBits(features[topIdx][noveltyColumns[t]]);
-                            noveltyCounts[t].merge(cat, 1, Integer::sum);
-                        }
-                    }
                     break;
                 }
 
                 // Recompute diversity for this candidate
-                double divScore = computeDiversity(features, topIdx, noveltyCounts, selectedCount);
+                double divScore = computeDiversity(topIdx, catInts, catLongs,
+                        arrayCounters, mapCounters, selectedCount);
                 double newGain = baseScores[topIdx] + divScore;
                 evals++;
 
                 if (evals >= maxEvalsPerPos) {
-                    // Budget exhausted: this candidate is our best so far
-                    // Check if any already-evaluated-this-step items in heap are better
+                    // Budget exhausted: pick best among evaluated this step
                     double bestGain = newGain;
                     int bestIdx = topIdx;
 
-                    // Scan heap for items evaluated this step (they're near the top)
                     for (int h = 0; h < heapSize; h++) {
                         if (heapStep[h] == step && !inSelected[heapIdx[h]] && heapGain[h] > bestGain) {
-                            // Swap: put our current best back, take this one
-                            // Push current best into heap
                             heapGain[heapSize] = bestGain;
                             heapIdx[heapSize] = bestIdx;
                             heapStep[heapSize] = step;
                             heapSize++;
                             siftUp(heapGain, heapIdx, heapStep, heapSize - 1);
-                            // Take the better one (remove from heap)
                             bestGain = heapGain[h];
                             bestIdx = heapIdx[h];
-                            // Remove h from heap
                             heapSize--;
                             if (h < heapSize) {
                                 heapGain[h] = heapGain[heapSize];
                                 heapIdx[h] = heapIdx[heapSize];
                                 heapStep[h] = heapStep[heapSize];
                                 siftDown(heapGain, heapIdx, heapStep, heapSize, h);
-                                h--; // re-check this position
+                                h--;
                             }
                         }
                     }
                     if (bestIdx != topIdx) {
-                        // Push topIdx back with its evaluated gain
                         heapGain[heapSize] = newGain;
                         heapIdx[heapSize] = topIdx;
                         heapStep[heapSize] = step;
@@ -183,15 +248,10 @@ public final class FastSubmodularReranker {
                     }
 
                     selected[step] = bestIdx;
-                    bestHeapPos = 0;
+                    found = true;
+                    updateCounters(bestIdx, catInts, catLongs, arrayCounters, mapCounters);
                     inSelected[bestIdx] = true;
                     selectedCount++;
-                    for (int t = 0; t < numTowers; t++) {
-                        if (noveltyColumns[t] >= 0) {
-                            long cat = Double.doubleToRawLongBits(features[bestIdx][noveltyColumns[t]]);
-                            noveltyCounts[t].merge(cat, 1, Integer::sum);
-                        }
-                    }
                     break;
                 }
 
@@ -203,7 +263,7 @@ public final class FastSubmodularReranker {
                 siftUp(heapGain, heapIdx, heapStep, heapSize - 1);
             }
 
-            if (bestHeapPos < 0) break; // shouldn't happen
+            if (!found) break;
         }
 
         return selected;
@@ -224,27 +284,50 @@ public final class FastSubmodularReranker {
     }
 
     /**
-     * Compute diversity score for a candidate using incremental state.
+     * Compute diversity score for a candidate using compiled towers + array/map counters.
      */
-    private double computeDiversity(double[][] features, int candidateIdx,
-                                     Map<Long, Integer>[] noveltyCounts, int selectedCount) {
+    private double computeDiversity(int candidateIdx,
+                                     int[][] catInts, long[][] catLongs,
+                                     int[][] arrayCounters, Map<Long, Integer>[] mapCounters,
+                                     int selectedCount) {
         double divScore = 0;
         for (int t = 0; t < numTowers; t++) {
             double gwFeat;
-            if (noveltyColumns[t] >= 0 && noveltyCounts[t] != null) {
-                if (selectedCount == 0) {
-                    gwFeat = 1.0; // max novelty when S is empty
-                } else {
-                    long cat = Double.doubleToRawLongBits(features[candidateIdx][noveltyColumns[t]]);
-                    int matches = noveltyCounts[t].getOrDefault(cat, 0);
-                    gwFeat = 1.0 - (double) matches / selectedCount;
-                }
+            if (noveltyColumns[t] < 0) {
+                gwFeat = 1.0;
+            } else if (selectedCount == 0) {
+                gwFeat = 1.0;
+            } else if (catInts[t] != null) {
+                // Array counter: O(1) indexed lookup
+                int cat = catInts[t][candidateIdx];
+                int matches = arrayCounters[t][cat];
+                gwFeat = 1.0 - (double) matches / selectedCount;
             } else {
-                gwFeat = 1.0; // fallback for unsupported tower types
+                // HashMap fallback
+                long cat = catLongs[t][candidateIdx];
+                int matches = mapCounters[t].getOrDefault(cat, 0);
+                gwFeat = 1.0 - (double) matches / selectedCount;
             }
-            divScore += diversityTowers[t].evaluate(gwFeat);
+            divScore += compiledTowers[t].eval(gwFeat);
         }
         return divScore;
+    }
+
+    /**
+     * Update novelty counters when a candidate is selected.
+     */
+    private void updateCounters(int docIdx,
+                                 int[][] catInts, long[][] catLongs,
+                                 int[][] arrayCounters, Map<Long, Integer>[] mapCounters) {
+        for (int t = 0; t < numTowers; t++) {
+            if (noveltyColumns[t] < 0) continue;
+            if (catInts[t] != null) {
+                arrayCounters[t][catInts[t][docIdx]]++;
+            } else {
+                long cat = catLongs[t][docIdx];
+                mapCounters[t].merge(cat, 1, Integer::sum);
+            }
+        }
     }
 
     // ── Array-based max-heap operations ──

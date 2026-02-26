@@ -20,6 +20,15 @@ public final class FastSubmodularRerankerTest {
     private static int failed = 0;
 
     public static void main(String[] args) {
+        // CompiledConcavePwl tests
+        testCompiledConcaveMatchesOriginalK0();
+        testCompiledConcaveMatchesOriginalK1();
+        testCompiledConcaveMatchesOriginalK4();
+        testCompiledConcaveMatchesOriginalK6();
+        testCompiledConcaveMatchesOriginalK8Fallback();
+        testCompiledConcaveEvaluateAtMax();
+
+        // Reranker tests
         testEmptyInput();
         testSingleDocument();
         testKGreaterThanN();
@@ -30,6 +39,7 @@ public final class FastSubmodularRerankerTest {
         testPrecomputedBaseScores();
         testSelectionOrderDeterministic();
         testDiversityActuallyDiversifies();
+        testArrayCounterMatchesHashMap();
 
         System.out.println();
         System.out.printf("Results: %d passed, %d failed, %d total%n",
@@ -105,7 +115,93 @@ public final class FastSubmodularRerankerTest {
         }
     }
 
-    // ── Tests ──
+    // ── CompiledConcavePwl Tests ──
+
+    private static void testCompiledConcaveMatchesOriginalK0() {
+        System.out.println("testCompiledConcaveMatchesOriginalK0");
+        ConcavePwlFunction src = new ConcavePwlFunction(
+                2.5, new double[0], new double[0], new double[0], 0.0, 1.0);
+        CompiledConcavePwl compiled = CompiledConcavePwl.compile(src);
+        check("K0: constant at 0.0", Math.abs(compiled.evaluate(0.0) - src.evaluate(0.0)) < 1e-12);
+        check("K0: constant at 0.5", Math.abs(compiled.evaluate(0.5) - src.evaluate(0.5)) < 1e-12);
+        check("K0: constant at 1.0", Math.abs(compiled.evaluate(1.0) - src.evaluate(1.0)) < 1e-12);
+    }
+
+    private static void testCompiledConcaveMatchesOriginalK1() {
+        System.out.println("testCompiledConcaveMatchesOriginalK1");
+        double[] edges = {0.2};
+        double[] widths = {0.6};
+        double[] slopes = {1.5};
+        ConcavePwlFunction src = new ConcavePwlFunction(0.1, edges, widths, slopes, 0.0, 1.0);
+        CompiledConcavePwl compiled = CompiledConcavePwl.compile(src);
+        double maxErr = checkManyPoints(src, compiled, 0.0, 1.0, 1000);
+        check("K1: max error = " + maxErr, maxErr < 1e-12);
+    }
+
+    private static void testCompiledConcaveMatchesOriginalK4() {
+        System.out.println("testCompiledConcaveMatchesOriginalK4");
+        double[] edges  = {0.0, 0.25, 0.5, 0.75};
+        double[] widths = {0.25, 0.25, 0.25, 0.25};
+        double[] slopes = {0.8, 0.4, 0.2, 0.1};
+        ConcavePwlFunction src = new ConcavePwlFunction(0.0, edges, widths, slopes, 0.0, 1.0);
+        CompiledConcavePwl compiled = CompiledConcavePwl.compile(src);
+        double maxErr = checkManyPoints(src, compiled, -0.5, 1.5, 10000);
+        check("K4: max error = " + maxErr, maxErr < 1e-12);
+    }
+
+    private static void testCompiledConcaveMatchesOriginalK6() {
+        System.out.println("testCompiledConcaveMatchesOriginalK6");
+        double[] edges  = {0.0, 0.1, 0.3, 0.5, 0.7, 0.9};
+        double[] widths = {0.1, 0.2, 0.2, 0.2, 0.2, 0.1};
+        double[] slopes = {1.0, 0.8, 0.6, 0.4, 0.2, 0.1};
+        ConcavePwlFunction src = new ConcavePwlFunction(0.5, edges, widths, slopes, 0.0, 1.0);
+        CompiledConcavePwl compiled = CompiledConcavePwl.compile(src);
+        double maxErr = checkManyPoints(src, compiled, 0.0, 1.0, 10000);
+        check("K6: max error = " + maxErr, maxErr < 1e-12);
+    }
+
+    private static void testCompiledConcaveMatchesOriginalK8Fallback() {
+        System.out.println("testCompiledConcaveMatchesOriginalK8Fallback");
+        double[] edges  = new double[8];
+        double[] widths = new double[8];
+        double[] slopes = new double[8];
+        for (int i = 0; i < 8; i++) {
+            edges[i] = i * 0.125;
+            widths[i] = 0.125;
+            slopes[i] = 1.0 - i * 0.1;
+        }
+        ConcavePwlFunction src = new ConcavePwlFunction(0.0, edges, widths, slopes, 0.0, 1.0);
+        CompiledConcavePwl compiled = CompiledConcavePwl.compile(src);
+        double maxErr = checkManyPoints(src, compiled, 0.0, 1.0, 10000);
+        check("K8 fallback: max error = " + maxErr, maxErr < 1e-12);
+    }
+
+    private static void testCompiledConcaveEvaluateAtMax() {
+        System.out.println("testCompiledConcaveEvaluateAtMax");
+        double[] edges  = {0.0, 0.25, 0.5, 0.75};
+        double[] widths = {0.25, 0.25, 0.25, 0.25};
+        double[] slopes = {0.8, 0.4, 0.2, 0.1};
+        ConcavePwlFunction src = new ConcavePwlFunction(0.0, edges, widths, slopes, 0.0, 1.0);
+        CompiledConcavePwl compiled = CompiledConcavePwl.compile(src);
+        check("evaluateAtMax matches",
+                Math.abs(compiled.evaluateAtMax() - src.evaluateAtMax()) < 1e-12);
+        check("evaluateAtMax matches evaluate(1.0)",
+                Math.abs(compiled.evaluateAtMax() - compiled.evaluate(1.0)) < 1e-12);
+    }
+
+    private static double checkManyPoints(ConcavePwlFunction src, CompiledConcavePwl compiled,
+                                           double lo, double hi, int n) {
+        double maxErr = 0;
+        for (int i = 0; i <= n; i++) {
+            double x = lo + (hi - lo) * i / n;
+            double expected = src.evaluate(x);
+            double actual = compiled.evaluate(x);
+            maxErr = Math.max(maxErr, Math.abs(expected - actual));
+        }
+        return maxErr;
+    }
+
+    // ── Reranker Tests ──
 
     private static void testEmptyInput() {
         System.out.println("testEmptyInput");
@@ -294,6 +390,30 @@ public final class FastSubmodularRerankerTest {
                 cat0 > 0 && cat1 > 0);
         check("diversity: cat-1 appears in top 6 despite lower base score",
                 countCat(features, selected, 1, 6) > 0);
+    }
+
+    private static void testArrayCounterMatchesHashMap() {
+        System.out.println("testArrayCounterMatchesHashMap (n=500, k=30)");
+        DistilledGamModel model = makeSimpleModel(10);
+        ConcavePwlFunction[] towers = makeTowers(2);
+        int catCol = 0, brandCol = 1;
+        int[] novCols = {catCol, brandCol};
+
+        // HashMap version (default, maxCats = -1)
+        FastSubmodularReranker hashMapReranker = new FastSubmodularReranker(model, towers, novCols);
+
+        // Array counter version (explicit maxCategoryValues)
+        int[] maxCats = {50, 20};
+        FastSubmodularReranker arrayReranker = new FastSubmodularReranker(model, towers, novCols, maxCats);
+
+        Random rng = new Random(777);
+        double[][] features = makeFeatures(rng, 500, 10, catCol, 50, brandCol, 20);
+
+        int[] hashResult = hashMapReranker.rerank(features, 30);
+        int[] arrayResult = arrayReranker.rerank(features, 30);
+
+        check("array vs hashmap: same length", hashResult.length == arrayResult.length);
+        check("array vs hashmap: identical selections", Arrays.equals(hashResult, arrayResult));
     }
 
     private static int countCat(double[][] features, int[] selected, double catVal, int topK) {

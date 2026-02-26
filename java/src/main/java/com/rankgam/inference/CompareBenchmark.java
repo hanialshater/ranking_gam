@@ -133,10 +133,10 @@ public final class CompareBenchmark {
         // ── Submodular reranking benchmark ──
         if (withSubmodular) {
             System.out.println();
-            System.out.println("=== Submodular Reranking: Original vs Fast ===");
+            System.out.println("=== Submodular Reranking: Original vs Fast (compiled towers + array counters) ===");
             System.out.println("  2 diversity towers (category_novelty, brand_novelty), k=40");
             System.out.println("  Original: PriorityQueue<Candidate> + DefaultGroupwiseComputer (O(|S|) per eval)");
-            System.out.println("  Fast: array heap + incremental novelty counters (O(1) per eval)");
+            System.out.println("  Fast: compiled ConcavePwl + int[] counters + array heap (O(1) per eval)");
             System.out.println();
 
             // Synthetic concave diversity towers: slopes=[0.8, 0.4, 0.2, 0.1]
@@ -157,12 +157,15 @@ public final class CompareBenchmark {
             DefaultGroupwiseComputer computer = new DefaultGroupwiseComputer(specs);
             SubmodularGamReranker original = new SubmodularGamReranker(optimizedModel, towers, computer);
 
-            // Fast reranker
+            // Fast reranker with compiled towers + array counters
+            int numCategories = 5;
+            int numBrands = 3;
             int[] noveltyCols = {catCol, brandCol};
-            FastSubmodularReranker fast = new FastSubmodularReranker(optimizedModel, towers, noveltyCols);
+            int[] maxCats = {numCategories, numBrands};
+            FastSubmodularReranker fast = new FastSubmodularReranker(
+                    optimizedModel, towers, noveltyCols, maxCats);
 
             int k = 40;
-            int numCategories = 5;
 
             System.out.printf("%-8s | %-22s | %-22s | %s%n",
                     "Docs", "Original (us/rerank)", "Fast (us/rerank)", "Speedup");
@@ -173,7 +176,7 @@ public final class CompareBenchmark {
                 double[][] docs = new double[listSize][numFeatures];
                 for (int i = 0; i < listSize; i++) {
                     docs[i][catCol] = i % numCategories;
-                    docs[i][brandCol] = i % 3;
+                    docs[i][brandCol] = i % numBrands;
                     for (int j = 0; j < numFeatures; j++) {
                         if (j != catCol && j != brandCol)
                             docs[i][j] = rng.nextGaussian() * 2.0;
@@ -197,7 +200,7 @@ public final class CompareBenchmark {
                 long origNs = System.nanoTime() - t0;
                 double origUs = origNs / 1_000.0 / iters;
 
-                // Benchmark fast (with precomputed base scores)
+                // Benchmark fast (compiled towers + array counters)
                 t0 = System.nanoTime();
                 for (int i = 0; i < iters; i++) fast.rerank(docs, baseScores, k, 0);
                 long fastNs = System.nanoTime() - t0;

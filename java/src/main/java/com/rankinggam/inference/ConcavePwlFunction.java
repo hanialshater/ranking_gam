@@ -74,4 +74,7 @@ public final class ConcavePwlFunction {
     public double xMin() { return xMin; }
     public double xMax() { return xMax; }
     public int numKnots() { return numKnots; }
+    public double[] knotEdges() { return knotEdges.clone(); }
+    public double[] knotWidths() { return knotWidths.clone(); }
+    public double[] slopes() { return slopes.clone(); }
 }
