@@ -1,8 +1,11 @@
 package com.rankgam.inference;
 
 import com.rankinggam.inference.BilinearGridFunction;
+import com.rankinggam.inference.ConcavePwlFunction;
+import com.rankinggam.inference.DefaultGroupwiseComputer;
 import com.rankinggam.inference.DistilledGamModel;
 import com.rankinggam.inference.PwlFunction;
+import com.rankinggam.inference.SubmodularGamReranker;
 
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -21,20 +24,26 @@ import java.util.Random;
  *   <li><b>Optimized columnar</b> ({@link DistilledGamModel#scoreColumnar}): compiled if/else, zero-copy
  * </ul>
  *
+ * <p>Also benchmarks submodular diversity reranking when {@code --with-submodular}
+ * is passed, using synthetic concave diversity towers.
+ *
  * <p>Usage:
  * <pre>
- *   java com.rankgam.inference.CompareBenchmark model.json
+ *   java com.rankgam.inference.CompareBenchmark model.json [--with-submodular]
  * </pre>
  */
 public final class CompareBenchmark {
 
     public static void main(String[] args) throws Exception {
         if (args.length < 1) {
-            System.err.println("Usage: CompareBenchmark <model.json>");
+            System.err.println("Usage: CompareBenchmark <model.json> [--with-submodular]");
             System.exit(1);
         }
 
         Path modelPath = Paths.get(args[0]);
+        boolean withSubmodular = false;
+        for (int i = 1; i < args.length; i++)
+            if ("--with-submodular".equals(args[i])) withSubmodular = true;
 
         // ── Load model ──
         PwlModel normalModel = PwlModelLoader.load(modelPath);
@@ -118,6 +127,72 @@ public final class CompareBenchmark {
 
             System.out.printf("%,8d | %8.2f     %,14.0f | %8.2f     %,14.0f | %8.2f     %,14.0f | %.2fx%n",
                     listSize, normalUsDoc, normalDps, optRowUsDoc, optRowDps, optColUsDoc, optColDps, speedup);
+        }
+
+        // ── Submodular reranking benchmark ──
+        if (withSubmodular) {
+            System.out.println();
+            System.out.println("=== Submodular Reranking (Minoux lazy greedy) ===");
+            System.out.println("  2 diversity towers (category_novelty, brand_novelty), k=40");
+            System.out.println();
+
+            // Synthetic concave diversity towers: slopes=[0.8, 0.4, 0.2, 0.1]
+            double[] knotEdges  = {0.0, 0.25, 0.5, 0.75};
+            double[] knotWidths = {0.25, 0.25, 0.25, 0.25};
+            double[] slopes     = {0.8, 0.4, 0.2, 0.1};
+            ConcavePwlFunction tower1 = new ConcavePwlFunction(0.0, knotEdges, knotWidths, slopes, 0.0, 1.0);
+            ConcavePwlFunction tower2 = new ConcavePwlFunction(0.0, knotEdges, knotWidths, slopes, 0.0, 1.0);
+            ConcavePwlFunction[] towers = {tower1, tower2};
+
+            int catCol = 0, brandCol = Math.min(1, numFeatures - 1);
+            DefaultGroupwiseComputer.Spec[] specs = {
+                DefaultGroupwiseComputer.Spec.novelty("category_novelty", catCol),
+                DefaultGroupwiseComputer.Spec.novelty("brand_novelty", brandCol)
+            };
+            DefaultGroupwiseComputer computer = new DefaultGroupwiseComputer(specs);
+            SubmodularGamReranker reranker = new SubmodularGamReranker(optimizedModel, towers, computer);
+
+            int k = 40;
+            int numCategories = 5;
+
+            System.out.printf("%-8s | %-20s | %-20s%n", "Docs", "budget=10", "lazy-greedy");
+            System.out.printf("%-8s | %-20s | %-20s%n", "", "us/rerank", "us/rerank");
+            System.out.println("-".repeat(55));
+
+            for (int listSize : new int[]{100, 1_000, 10_000}) {
+                rng = new Random(42);
+                double[][] docs = new double[listSize][numFeatures];
+                for (int i = 0; i < listSize; i++) {
+                    docs[i][catCol] = i % numCategories;
+                    docs[i][brandCol] = i % 3;
+                    for (int j = 0; j < numFeatures; j++) {
+                        if (j != catCol && j != brandCol)
+                            docs[i][j] = rng.nextGaussian() * 2.0;
+                    }
+                }
+
+                // Warmup
+                for (int w = 0; w < 3; w++) {
+                    reranker.rerank(docs, k, 10);
+                    reranker.rerank(docs, k);
+                }
+
+                int iters = Math.max(10, 1_000 / listSize);
+
+                // Budget=10
+                long t0 = System.nanoTime();
+                for (int i = 0; i < iters; i++) reranker.rerank(docs, k, 10);
+                long budgetNs = System.nanoTime() - t0;
+                double budgetUs = budgetNs / 1_000.0 / iters;
+
+                // Unlimited (Minoux lazy greedy)
+                t0 = System.nanoTime();
+                for (int i = 0; i < iters; i++) reranker.rerank(docs, k);
+                long lazyNs = System.nanoTime() - t0;
+                double lazyUs = lazyNs / 1_000.0 / iters;
+
+                System.out.printf("%,8d | %,16.1f     | %,16.1f%n", listSize, budgetUs, lazyUs);
+            }
         }
     }
 
