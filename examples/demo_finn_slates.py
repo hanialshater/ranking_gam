@@ -49,6 +49,8 @@ def make_loss(name):
         return rg.ApproxNDCGLoss(alpha=10)
     elif name == "pairwise":
         return rg.PairwiseLoss(sigma=1.0)
+    elif name == "diffsort":
+        return rg.DiffSortNDCGLoss(k=10, regularization_strength=1.0)
     else:
         raise ValueError(f"Unknown loss: {name}")
 

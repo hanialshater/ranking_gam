@@ -84,7 +84,7 @@ def main():
     print(f"  Scores each document independently (no cross-doc attention)")
     print(f"  Captures feature interactions via self-attention across features")
 
-    loss_fn = make_loss(args.loss, args.label_smoothing)
+    loss_fn = make_loss(args.loss, args.label_smoothing, k=args.k)
     inv_ndcg = rg.train_model(
         inv_transformer, data["train_loader"], data["eval_loader"], loss_fn,
         epochs=args.epochs, patience=args.patience, device=device,

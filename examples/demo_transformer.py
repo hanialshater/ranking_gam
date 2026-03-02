@@ -67,7 +67,7 @@ def main():
     n_params = sum(p.numel() for p in transformer.parameters())
     print(f"  Parameters: {n_params:,}")
 
-    loss_fn = make_loss(args.loss, args.label_smoothing)
+    loss_fn = make_loss(args.loss, args.label_smoothing, k=args.k)
     transformer_ndcg = rg.train_model(
         transformer, data["train_loader"], data["eval_loader"], loss_fn,
         epochs=args.epochs, patience=args.patience, device=device,

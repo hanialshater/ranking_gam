@@ -61,7 +61,7 @@ def main():
     if args.transforms:
         model.init_transforms_from_data(data["train_X"])
 
-    loss_fn = make_loss(args.loss, args.label_smoothing)
+    loss_fn = make_loss(args.loss, args.label_smoothing, k=args.k)
     ndcg = rg.train_model(
         model, data["train_loader"], data["eval_loader"], loss_fn,
         epochs=args.epochs, patience=args.patience, device=device,
