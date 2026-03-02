@@ -44,6 +44,8 @@ def __getattr__(name):
         "LambdaLoss": (".losses", "LambdaLoss"),
         "DiffSortNDCGLoss": (".losses", "DiffSortNDCGLoss"),
         "soft_rank": (".losses", "soft_rank"),
+        "PiRankNDCGLoss": (".losses", "PiRankNDCGLoss"),
+        "neural_sort": (".losses", "neural_sort"),
         # Metrics
         "compute_ndcg": (".metrics", "compute_ndcg"),
         "evaluate_ranking_diversity": (".metrics", "evaluate_ranking_diversity"),
@@ -126,6 +128,8 @@ __all__ = [
     "LambdaLoss",
     "DiffSortNDCGLoss",
     "soft_rank",
+    "PiRankNDCGLoss",
+    "neural_sort",
     # Metrics
     "compute_ndcg",
     "evaluate_ranking_diversity",

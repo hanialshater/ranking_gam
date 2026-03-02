@@ -156,6 +156,8 @@ def make_loss(loss_name, label_smoothing=0.0, k=10):
         return rg.ListMLELoss()
     elif loss_name == "diffsort":
         return rg.DiffSortNDCGLoss(k=k, regularization_strength=1.0)
+    elif loss_name == "pirank":
+        return rg.PiRankNDCGLoss(k=k, tau=1.0)
     else:
         raise ValueError(
             f"Unknown loss: {loss_name}. "
@@ -163,7 +165,7 @@ def make_loss(loss_name, label_smoothing=0.0, k=10):
         )
 
 
-LOSS_CHOICES = ["listnet", "pairwise", "approxndcg", "ndcg2pp", "listmle", "diffsort"]
+LOSS_CHOICES = ["listnet", "pairwise", "approxndcg", "ndcg2pp", "listmle", "diffsort", "pirank"]
 ACTIVATION_CHOICES = ["relu", "silu", "gelu"]
 LR_SCHEDULE_CHOICES = ["constant", "cosine", "plateau"]
 

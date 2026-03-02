@@ -51,6 +51,8 @@ def make_loss(name):
         return rg.PairwiseLoss(sigma=1.0)
     elif name == "diffsort":
         return rg.DiffSortNDCGLoss(k=10, regularization_strength=1.0)
+    elif name == "pirank":
+        return rg.PiRankNDCGLoss(k=10, tau=1.0)
     else:
         raise ValueError(f"Unknown loss: {name}")
 
