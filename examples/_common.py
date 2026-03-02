@@ -142,7 +142,7 @@ def groupwise_specs(num_base=136):
     ]
 
 
-def make_loss(loss_name, label_smoothing=0.0):
+def make_loss(loss_name, label_smoothing=0.0, k=10):
     """Create loss function by name."""
     if loss_name == "listnet":
         return rg.ListNetLoss(label_smoothing=label_smoothing)
@@ -154,14 +154,16 @@ def make_loss(loss_name, label_smoothing=0.0):
         return rg.LambdaLoss.ndcg2pp()
     elif loss_name == "listmle":
         return rg.ListMLELoss()
+    elif loss_name == "diffsort":
+        return rg.DiffSortNDCGLoss(k=k, regularization_strength=1.0)
     else:
         raise ValueError(
             f"Unknown loss: {loss_name}. "
-            f"Choose from: listnet, pairwise, approxndcg, ndcg2pp, listmle"
+            f"Choose from: {', '.join(LOSS_CHOICES)}"
         )
 
 
-LOSS_CHOICES = ["listnet", "pairwise", "approxndcg", "ndcg2pp", "listmle"]
+LOSS_CHOICES = ["listnet", "pairwise", "approxndcg", "ndcg2pp", "listmle", "diffsort"]
 ACTIVATION_CHOICES = ["relu", "silu", "gelu"]
 LR_SCHEDULE_CHOICES = ["constant", "cosine", "plateau"]
 

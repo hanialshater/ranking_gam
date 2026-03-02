@@ -67,7 +67,7 @@ def run(data, args):
         print("  Initialized feature transforms from training data percentiles")
 
     # Phase 1: base towers
-    loss_fn = make_loss(args.loss, args.label_smoothing)
+    loss_fn = make_loss(args.loss, args.label_smoothing, k=args.k)
     submod_ndcg = rg.train_model(
         submod, data["train_loader"], data["eval_loader"],
         loss_fn,

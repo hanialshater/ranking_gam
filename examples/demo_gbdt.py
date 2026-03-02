@@ -79,7 +79,7 @@ def run(data, args):
     if args.transforms:
         gam.init_transforms_from_data(data["train_X"])
 
-    loss_fn = make_loss(args.loss, args.label_smoothing)
+    loss_fn = make_loss(args.loss, args.label_smoothing, k=args.k)
     train_loader, eval_loader = make_loaders(data["train_X"], data["train_y"])
     gam_ndcg = rg.train_model(
         gam, train_loader, eval_loader, loss_fn,
