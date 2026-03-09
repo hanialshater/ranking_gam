@@ -30,6 +30,7 @@ public class OptimizationBenchmark {
         benchmarkPwlSinglePoint();
         benchmarkPwlBulk();
         benchmarkScoringLayouts();
+        benchmarkGA2MScoringLayouts();
         benchmarkBilinearSingleVsBulk();
     }
 
@@ -189,6 +190,96 @@ public class OptimizationBenchmark {
 
             System.out.printf("    list=%,-6d  row-by-row: %,.0f Mops/s  col-major: %,.0f Mops/s (%.2fx)  columnar: %,.0f Mops/s (%.2fx)%n",
                     listSize,
+                    opsRowByRow / 1e6,
+                    opsColMajor / 1e6, opsColMajor / opsRowByRow,
+                    opsColumnar / 1e6, opsColumnar / opsRowByRow);
+        }
+        System.out.println();
+    }
+
+    // ── 3b. GA2M scoring (main effects + interactions) ──
+
+    static void benchmarkGA2MScoringLayouts() {
+        System.out.println("--- 3b. GA2M scoring (main effects + pairwise interactions) ---");
+        System.out.println("    Realistic GA2M: 10 main effects (K=4) + 5 interaction pairs (5x5 grid)");
+        System.out.println();
+
+        int numFeatures = 10;
+        Random rng = new Random(42);
+
+        // 10 main effects
+        java.util.List<DistilledGamModel.MainEffect> effects = new java.util.ArrayList<>();
+        for (int j = 0; j < numFeatures; j++) {
+            double[] xk = {0.0, 0.33, 0.67, 1.0};
+            double[] yk = new double[4];
+            for (int i = 0; i < 4; i++) yk[i] = rng.nextDouble() * 2 - 1;
+            effects.add(new DistilledGamModel.MainEffect(j, new PwlFunction(xk, yk)));
+        }
+
+        // 5 interaction pairs (top correlated pairs)
+        int[][] pairs = {{0, 1}, {2, 3}, {4, 5}, {0, 6}, {7, 8}};
+        java.util.List<DistilledGamModel.Interaction> interactions = new java.util.ArrayList<>();
+        for (int[] pair : pairs) {
+            int gridSize = 5;
+            double[] x1Grid = new double[gridSize];
+            double[] x2Grid = new double[gridSize];
+            double[][] z = new double[gridSize][gridSize];
+            for (int i = 0; i < gridSize; i++) {
+                x1Grid[i] = (double) i / (gridSize - 1);
+                x2Grid[i] = (double) i / (gridSize - 1);
+                for (int j = 0; j < gridSize; j++)
+                    z[i][j] = rng.nextDouble() * 0.5 - 0.25;
+            }
+            interactions.add(new DistilledGamModel.Interaction(
+                    pair[0], pair[1], new BilinearGridFunction(x1Grid, x2Grid, z)));
+        }
+
+        DistilledGamModel model = new DistilledGamModel(0.5, effects, interactions);
+
+        // Also build GAM-only (same main effects, no interactions) for comparison
+        DistilledGamModel gamOnly = new DistilledGamModel(0.5, effects, java.util.List.of());
+
+        for (int listSize : new int[]{40, 200, 1000, 10_000}) {
+            double[][] rowMajor = new double[listSize][numFeatures];
+            rng = new Random(123);
+            for (int i = 0; i < listSize; i++)
+                for (int j = 0; j < numFeatures; j++)
+                    rowMajor[i][j] = rng.nextDouble();
+
+            double[][] columns = new double[numFeatures][listSize];
+            for (int i = 0; i < listSize; i++)
+                for (int j = 0; j < numFeatures; j++)
+                    columns[j][i] = rowMajor[i][j];
+
+            // GAM-only columnar (baseline for comparison)
+            double opsGamColumnar = benchmarkOps(() -> {
+                double[] s = gamOnly.scoreColumnar(columns, listSize);
+                return s[0];
+            }, listSize);
+
+            // GA2M row-by-row
+            double opsRowByRow = benchmarkOps(() -> {
+                double sink = 0;
+                for (int i = 0; i < listSize; i++)
+                    sink += model.scoreDocument(rowMajor[i]);
+                return sink;
+            }, listSize);
+
+            // GA2M column-major
+            double opsColMajor = benchmarkOps(() -> {
+                double[] s = model.score(rowMajor);
+                return s[0];
+            }, listSize);
+
+            // GA2M columnar
+            double opsColumnar = benchmarkOps(() -> {
+                double[] s = model.scoreColumnar(columns, listSize);
+                return s[0];
+            }, listSize);
+
+            System.out.printf("    list=%,-6d  GAM-only: %,.0f  GA2M row: %,.0f  GA2M col-major: %,.0f (%.2fx)  GA2M columnar: %,.0f Mops/s (%.2fx)%n",
+                    listSize,
+                    opsGamColumnar / 1e6,
                     opsRowByRow / 1e6,
                     opsColMajor / 1e6, opsColMajor / opsRowByRow,
                     opsColumnar / 1e6, opsColumnar / opsRowByRow);
