@@ -32,6 +32,7 @@ public class OptimizationBenchmark {
         benchmarkScoringLayouts();
         benchmarkGA2MScoringLayouts();
         benchmarkBilinearSingleVsBulk();
+        benchmarkCompiledBilinear();
     }
 
     // ── 1. CompiledPwl vs PwlFunction: single-point evaluation ──
@@ -334,6 +335,61 @@ public class OptimizationBenchmark {
 
             System.out.printf("    list=%,-6d  single-loop: %,.0f Mops/s  bulk: %,.0f Mops/s  speedup: %.2fx%n",
                     listSize, opsSingle / 1e6, opsBulk / 1e6, opsBulk / opsSingle);
+        }
+        System.out.println();
+    }
+
+    // ── 5. CompiledBilinearGrid vs BilinearGridFunction ──
+
+    static void benchmarkCompiledBilinear() {
+        System.out.println("--- 5. CompiledBilinearGrid vs BilinearGridFunction (bulk) ---");
+        System.out.println("    Tests compiled if/else cell-finding vs binary search on both axes.");
+        System.out.println();
+
+        for (int gridSize : new int[]{3, 5}) {
+            double[] x1Grid = new double[gridSize];
+            double[] x2Grid = new double[gridSize];
+            double[][] z = new double[gridSize][gridSize];
+            Random rng = new Random(42);
+            for (int i = 0; i < gridSize; i++) {
+                x1Grid[i] = (double) i / (gridSize - 1);
+                x2Grid[i] = (double) i / (gridSize - 1);
+                for (int j = 0; j < gridSize; j++)
+                    z[i][j] = rng.nextDouble();
+            }
+            BilinearGridFunction original = new BilinearGridFunction(x1Grid, x2Grid, z);
+            CompiledBilinearGridFunction compiled = CompiledBilinearGridFunction.compile(original);
+
+            for (int listSize : new int[]{40, 1000, 10_000}) {
+                double[] x1Vals = new double[listSize];
+                double[] x2Vals = new double[listSize];
+                rng = new Random(123);
+                for (int i = 0; i < listSize; i++) {
+                    x1Vals[i] = rng.nextDouble();
+                    x2Vals[i] = rng.nextDouble();
+                }
+                double[] scoresOrig = new double[listSize];
+                double[] scoresComp = new double[listSize];
+
+                // Original BilinearGridFunction
+                double opsOrig = benchmarkOps(() -> {
+                    Arrays.fill(scoresOrig, 0);
+                    original.evaluateAndAccumulate(x1Vals, x2Vals, scoresOrig, listSize);
+                    return scoresOrig[0];
+                }, listSize);
+
+                // Compiled
+                double opsCompiled = benchmarkOps(() -> {
+                    Arrays.fill(scoresComp, 0);
+                    compiled.evaluateAndAccumulate(x1Vals, x2Vals, scoresComp, listSize);
+                    return scoresComp[0];
+                }, listSize);
+
+                double speedup = opsCompiled / opsOrig;
+                System.out.printf("    %dx%d  list=%,-6d  Original: %,.0f Mops/s  Compiled: %,.0f Mops/s  speedup: %.2fx%n",
+                        gridSize, gridSize, listSize,
+                        opsOrig / 1e6, opsCompiled / 1e6, speedup);
+            }
         }
         System.out.println();
     }
