@@ -10,9 +10,9 @@ package com.rankinggam.inference;
  */
 public final class BilinearGridFunction {
 
-    private final double[] x1Grid;
-    private final double[] x2Grid;
-    private final double[][] z; // z[i][j] = value at (x1Grid[i], x2Grid[j])
+    final double[] x1Grid;
+    final double[] x2Grid;
+    final double[][] z; // z[i][j] = value at (x1Grid[i], x2Grid[j])
 
     /**
      * @param x1Grid sorted x1 coordinates (first axis)

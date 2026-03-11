@@ -41,6 +41,7 @@ public final class DistilledGamModel {
     private final CompiledPwlFunction[] compiledPwl;
     private final int[] pwlFeatureIndices;
     private final BilinearGridFunction[] interactionGrids;
+    private final CompiledBilinearGridFunction[] compiledGrids;
     private final int[] interactionF1;
     private final int[] interactionF2;
 
@@ -106,13 +107,15 @@ public final class DistilledGamModel {
             this.pwlFeatureIndices[j] = me.featureIndex;
         }
 
-        // Pre-extract interaction arrays for bulk access
+        // Pre-extract and compile interaction grids
         this.interactionGrids = new BilinearGridFunction[interactions.size()];
+        this.compiledGrids = new CompiledBilinearGridFunction[interactions.size()];
         this.interactionF1 = new int[interactions.size()];
         this.interactionF2 = new int[interactions.size()];
         for (int k = 0; k < interactions.size(); k++) {
             Interaction ia = interactions.get(k);
             this.interactionGrids[k] = ia.grid;
+            this.compiledGrids[k] = CompiledBilinearGridFunction.compile(ia.grid);
             this.interactionF1[k] = ia.feature1;
             this.interactionF2[k] = ia.feature2;
         }
@@ -131,8 +134,8 @@ public final class DistilledGamModel {
             score += compiledPwl[j].evaluate(features[pwlFeatureIndices[j]]);
         }
 
-        for (int k = 0; k < interactionGrids.length; k++) {
-            score += interactionGrids[k].evaluate(
+        for (int k = 0; k < compiledGrids.length; k++) {
+            score += compiledGrids[k].evaluate(
                     features[interactionF1[k]], features[interactionF2[k]]);
         }
 
@@ -167,16 +170,16 @@ public final class DistilledGamModel {
             compiledPwl[j].evaluateAndAccumulate(column, scores, listSize);
         }
 
-        // Column-major interactions
-        if (interactionGrids.length > 0) {
+        // Column-major interactions (compiled)
+        if (compiledGrids.length > 0) {
             double[] col2 = new double[listSize];
-            for (int k = 0; k < interactionGrids.length; k++) {
+            for (int k = 0; k < compiledGrids.length; k++) {
                 final int f1 = interactionF1[k], f2 = interactionF2[k];
                 for (int i = 0; i < listSize; i++) {
                     column[i] = features[i][f1];
                     col2[i] = features[i][f2];
                 }
-                interactionGrids[k].evaluateAndAccumulate(column, col2, scores, listSize);
+                compiledGrids[k].evaluateAndAccumulate(column, col2, scores, listSize);
             }
         }
 
@@ -209,9 +212,9 @@ public final class DistilledGamModel {
                     columns[pwlFeatureIndices[j]], scores, numDocs);
         }
 
-        // Interactions
-        for (int k = 0; k < interactionGrids.length; k++) {
-            interactionGrids[k].evaluateAndAccumulate(
+        // Interactions (compiled)
+        for (int k = 0; k < compiledGrids.length; k++) {
+            compiledGrids[k].evaluateAndAccumulate(
                     columns[interactionF1[k]], columns[interactionF2[k]],
                     scores, numDocs);
         }

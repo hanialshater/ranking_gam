@@ -277,6 +277,106 @@ public class InferenceTest {
         }
     }
 
+    // ── CompiledBilinearGridFunction tests ──
+
+    static void testCompiledBilinearMatchesOriginal() {
+        // Test grid sizes 2x2 through 7x7 — compiled must match BilinearGridFunction exactly
+        java.util.Random rng = new java.util.Random(42);
+
+        for (int gridSize = 2; gridSize <= 7; gridSize++) {
+            double[] x1Grid = new double[gridSize];
+            double[] x2Grid = new double[gridSize];
+            double[][] z = new double[gridSize][gridSize];
+            for (int i = 0; i < gridSize; i++) {
+                x1Grid[i] = (double) i / (gridSize - 1);
+                x2Grid[i] = (double) i / (gridSize - 1) * 0.8 + 0.1; // different range
+                for (int j = 0; j < gridSize; j++) {
+                    z[i][j] = rng.nextDouble() * 4 - 2;
+                }
+            }
+
+            BilinearGridFunction original = new BilinearGridFunction(x1Grid, x2Grid, z);
+            CompiledBilinearGridFunction compiled = CompiledBilinearGridFunction.compile(original);
+
+            // Test at grid points, between points, and out-of-range
+            double[] testVals = {-0.5, 0.0, 0.1, 0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1.0, 1.5};
+
+            for (double x1 : testVals) {
+                for (double x2 : testVals) {
+                    double expected = original.evaluate(x1, x2);
+                    double actual = compiled.evaluate(x1, x2);
+                    assertEquals(expected, actual, 1e-12,
+                            "compiled grid " + gridSize + "x" + gridSize
+                                    + " at (" + x1 + "," + x2 + ")");
+                }
+            }
+        }
+    }
+
+    static void testCompiledBilinearBulkAccumulate() {
+        // Test bulk evaluateAndAccumulate matches single-point evaluation
+        java.util.Random rng = new java.util.Random(123);
+
+        for (int gridSize : new int[]{3, 5, 7}) {
+            double[] x1Grid = new double[gridSize];
+            double[] x2Grid = new double[gridSize];
+            double[][] z = new double[gridSize][gridSize];
+            for (int i = 0; i < gridSize; i++) {
+                x1Grid[i] = (double) i / (gridSize - 1);
+                x2Grid[i] = (double) i / (gridSize - 1);
+                for (int j = 0; j < gridSize; j++) {
+                    z[i][j] = rng.nextDouble();
+                }
+            }
+
+            BilinearGridFunction original = new BilinearGridFunction(x1Grid, x2Grid, z);
+            CompiledBilinearGridFunction compiled = CompiledBilinearGridFunction.compile(original);
+
+            int count = 50;
+            double[] x1Vals = new double[count];
+            double[] x2Vals = new double[count];
+            for (int i = 0; i < count; i++) {
+                x1Vals[i] = rng.nextDouble() * 1.4 - 0.2;
+                x2Vals[i] = rng.nextDouble() * 1.4 - 0.2;
+            }
+
+            // Bulk accumulate
+            double[] scores = new double[count];
+            compiled.evaluateAndAccumulate(x1Vals, x2Vals, scores, count);
+
+            // Compare with single-point
+            for (int i = 0; i < count; i++) {
+                double expected = original.evaluate(x1Vals[i], x2Vals[i]);
+                assertEquals(expected, scores[i], 1e-12,
+                        "bulk grid " + gridSize + "x" + gridSize + " at idx " + i);
+            }
+        }
+    }
+
+    static void testCompiledBilinearNonSquare() {
+        // Test asymmetric grid (falls through to fallback)
+        java.util.Random rng = new java.util.Random(77);
+        double[] x1Grid = {0, 0.5, 1.0};       // 3 points
+        double[] x2Grid = {0, 0.25, 0.5, 0.75, 1.0}; // 5 points
+        double[][] z = new double[3][5];
+        for (int i = 0; i < 3; i++)
+            for (int j = 0; j < 5; j++)
+                z[i][j] = rng.nextDouble();
+
+        BilinearGridFunction original = new BilinearGridFunction(x1Grid, x2Grid, z);
+        CompiledBilinearGridFunction compiled = CompiledBilinearGridFunction.compile(original);
+
+        double[] testVals = {-0.1, 0.0, 0.25, 0.5, 0.75, 1.0, 1.1};
+        for (double x1 : testVals) {
+            for (double x2 : testVals) {
+                double expected = original.evaluate(x1, x2);
+                double actual = compiled.evaluate(x1, x2);
+                assertEquals(expected, actual, 1e-12,
+                        "compiled grid 3x5 at (" + x1 + "," + x2 + ")");
+            }
+        }
+    }
+
     // ── Cross-validation with Python ──
 
     static void testMatchesPythonPwlPredict() throws Exception {
@@ -697,6 +797,9 @@ public class InferenceTest {
         testScoreFinite();
         testCompiledMatchesPwl();
         testCompiledBulkAccumulate();
+        testCompiledBilinearMatchesOriginal();
+        testCompiledBilinearBulkAccumulate();
+        testCompiledBilinearNonSquare();
         testColumnMajorScoring();
         testColumnarScoring();
         testMatchesPythonPwlPredict();
