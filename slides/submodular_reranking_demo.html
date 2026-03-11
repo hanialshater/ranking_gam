@@ -1,0 +1,1256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Submodular GAM Reranking v5</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=Playfair+Display:wght@600;700&display=swap');
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body {
+            background: #f5f4f1;
+            font-family: 'DM Sans', sans-serif;
+            color: #1e1e2a;
+            width: 100%; height: 100%;
+            overflow: hidden;
+        }
+        .root {
+            width: 100vw; height: 100vh;
+            display: flex; flex-direction: column;
+        }
+        /* ── TOP BAR ── */
+        .top-bar {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 10px 16px;
+            border-bottom: 1px solid #e0ddd8;
+            background: #ffffff;
+            flex-shrink: 0;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .top-bar h1 {
+            font-family: 'Playfair Display', serif;
+            font-size: clamp(16px, 3vw, 22px);
+            font-weight: 700;
+            background: linear-gradient(135deg, #d4480a, #e8622e, #ff8c61);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            white-space: nowrap;
+        }
+        .top-right { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+        .step-badge {
+            padding: 4px 10px; background: #f0eeea; border: 1px solid #e0ddd8;
+            border-radius: 4px; font-size: 11px; color: #8a8690; letter-spacing: 0.5px;
+        }
+        .step-badge span { color: #d4480a; font-weight: 700; }
+        .btn {
+            padding: 6px 14px; background: transparent; color: #d4480a;
+            border: 1px solid rgba(212,72,10,0.3); border-radius: 4px;
+            font-weight: 600; font-size: 11px; font-family: 'DM Sans', sans-serif;
+            letter-spacing: 1px; text-transform: uppercase; cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn:hover { background: rgba(212,72,10,0.06); }
+        .btn.primary { background: #d4480a; color: #fff; border-color: #d4480a; }
+        .btn.primary:hover { background: #b83d08; }
+        .btn:disabled { opacity: 0.25; cursor: default; }
+        /* ── NARRATOR ── */
+        .narrator {
+            padding: 8px 16px; background: #faf9f7;
+            border-bottom: 1px solid #e0ddd8;
+            display: flex; align-items: center; gap: 10px;
+            flex-shrink: 0; min-height: 40px;
+        }
+        .narrator .icon {
+            width: 24px; height: 24px; border-radius: 50%;
+            background: rgba(212,72,10,0.1);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 11px; flex-shrink: 0;
+        }
+        .nar-text { flex: 1; min-width: 0; }
+        .nar-text .msg { font-size: 12px; color: #1e1e2a; font-weight: 500; }
+        .nar-text .sub { font-size: 11px; color: #8a8690; margin-left: 6px; }
+        /* ── MAIN ── */
+        .main {
+            flex: 1; display: flex; overflow: hidden;
+        }
+        /* ── PANEL SHARED ── */
+        .panel { display: flex; flex-direction: column; overflow: hidden; }
+        .panel-hdr {
+            padding: 8px 12px; font-size: 9px; letter-spacing: 2px;
+            color: #8a8690; text-transform: uppercase; font-weight: 600;
+            border-bottom: 1px solid #e0ddd8;
+            display: flex; align-items: center; justify-content: space-between;
+            flex-shrink: 0; gap: 6px;
+        }
+        .panel-scroll { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 4px 0; }
+        .panel-scroll::-webkit-scrollbar { width: 3px; }
+        .panel-scroll::-webkit-scrollbar-thumb { background: #d4d0ca; border-radius: 3px; }
+        /* ── LEFT PANEL ── */
+        .panel-left {
+            flex: 1; background: #ffffff;
+            border-right: 1px solid #e0ddd8;
+            min-width: 0;
+        }
+        /* ── RIGHT PANEL ── */
+        .panel-right {
+            width: clamp(160px, 35%, 360px); background: #faf9f7;
+            flex-shrink: 0;
+        }
+        /* ── LEGEND ── */
+        .legend { display: flex; gap: 8px; flex-wrap: wrap; }
+        .legend-item { display: flex; align-items: center; gap: 3px; font-size: 9px; color: #8a8690; }
+        .legend-dot { width: 7px; height: 7px; border-radius: 2px; }
+        /* ── ITEM CARD ── */
+        .item-card {
+            display: flex; align-items: center;
+            padding: 8px 12px; gap: 8px;
+            transition: background 0.3s, max-height 0.5s ease, opacity 0.4s, padding 0.5s,
+                        box-shadow 0.3s;
+            max-height: 80px; overflow: hidden;
+            position: relative;
+            border-left: 3px solid transparent;
+        }
+        .item-card.flipping {
+            transition: transform 0.65s cubic-bezier(0.22, 1, 0.36, 1),
+                        background 0.3s, box-shadow 0.3s;
+            z-index: 5;
+        }
+        .item-card.resort-hl {
+            background: rgba(46,170,155,0.06);
+            border-left-color: rgba(46,170,155,0.3);
+        }
+        .item-card .rank-badge {
+            width: 20px; height: 20px; border-radius: 50%;
+            background: #f0eeea; border: 1px solid #e0ddd8;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 9px; font-weight: 700; color: #8a8690;
+            flex-shrink: 0;
+            transition: background 0.3s, color 0.3s, border-color 0.3s, transform 0.25s;
+        }
+        .item-card.highlight .rank-badge {
+            background: #d4480a; color: #fff; border-color: #d4480a;
+        }
+        .item-card.scanning .rank-badge {
+            background: #fdf2ee; border-color: #e8c4b4;
+        }
+        .rank-badge.moved-up {
+            background: #2eaa9b !important; color: #fff !important;
+            border-color: #2eaa9b !important; transform: scale(1.25);
+        }
+        .rank-badge.moved-down {
+            background: #e74c3c !important; color: #fff !important;
+            border-color: #e74c3c !important; transform: scale(1.25);
+        }
+        .rank-badge.moved-same {
+            background: #d4a017 !important; color: #fff !important;
+            border-color: #d4a017 !important;
+        }
+        .item-card .skip-badge {
+            position: absolute; left: 50%; top: 50%;
+            transform: translate(-50%, -50%);
+            background: #2eaa9b; color: #fff;
+            font-size: 9px; font-weight: 700; padding: 3px 10px;
+            border-radius: 4px; letter-spacing: 0.5px;
+            opacity: 0; transition: opacity 0.3s;
+            z-index: 10; white-space: nowrap;
+            pointer-events: none;
+        }
+        .item-card .skip-badge.show { opacity: 1; }
+        .item-card.scanning {
+            background: rgba(212,72,10,0.03);
+            border-left-color: rgba(212,72,10,0.15);
+        }
+        .item-card.highlight {
+            background: rgba(212,72,10,0.07);
+            border-left-color: #d4480a;
+            box-shadow: inset 0 0 0 1px rgba(212,72,10,0.15);
+        }
+        .item-card.selected {
+            opacity: 0; max-height: 0; padding-top: 0; padding-bottom: 0;
+            pointer-events: none;
+        }
+        .item-card .ic-icon {
+            width: 34px; height: 34px; border-radius: 8px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 16px; flex-shrink: 0;
+        }
+        .item-card .ic-body { flex: 1; min-width: 0; }
+        .item-card .ic-name {
+            font-size: 11px; font-weight: 600; color: #1e1e2a;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .item-card .ic-meta {
+            font-size: 9px; color: #8a8690; margin-bottom: 4px;
+        }
+        /* ── STACKED BAR ── */
+        .stacked-bar-wrap {
+            display: flex; align-items: center; gap: 4px;
+        }
+        .stacked-bar {
+            flex: 1; height: 14px; background: #eae8e4; border-radius: 7px;
+            display: flex; overflow: hidden;
+            transition: opacity 0.3s;
+            gap: 1px;
+        }
+        .sb-seg {
+            height: 100%;
+            transition: width 0.7s ease-in-out, background-color 0.4s;
+            min-width: 0;
+        }
+        .sb-seg.s-rel    { background: #e8622e; }
+        .sb-seg.s-cat    { background: #2eaa9b; }
+        .sb-seg.s-price  { background: #3498db; }
+        .sb-seg.s-style  { background: #e84393; }
+        .sb-seg.s-season { background: #d4a017; }
+        .sb-seg.s-age    { background: #6c5ce7; }
+        .sb-seg:first-child { border-radius: 7px 0 0 7px; }
+        .sb-seg:last-child { border-radius: 0 7px 7px 0; }
+        .sb-seg:only-child { border-radius: 7px; }
+        .sb-total {
+            font-size: 11px; font-weight: 700; color: #d4480a;
+            width: 32px; text-align: right; flex-shrink: 0;
+        }
+        .item-card .drop-label {
+            position: absolute; right: 8px; top: 4px;
+            font-size: 8px; font-weight: 600; color: #c0392b;
+            opacity: 0; transition: opacity 0.4s;
+            max-width: 55%; text-align: right;
+            line-height: 1.2;
+        }
+        .item-card .drop-label.show { opacity: 1; }
+        /* ── RERANKED ITEM ── */
+        .r-item {
+            display: flex; align-items: center;
+            padding: 7px 10px; gap: 6px;
+            opacity: 0; transform: translateX(20px);
+            transition: opacity 0.5s, transform 0.5s;
+        }
+        .r-item.visible { opacity: 1; transform: translateX(0); }
+        .r-item .r-pos {
+            font-size: 16px; font-weight: 700; color: #e0ddd8;
+            width: 22px; text-align: center; flex-shrink: 0;
+        }
+        .r-item.visible .r-pos { color: #c4c0ba; }
+        .r-item .r-icon {
+            width: 30px; height: 30px; border-radius: 6px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 14px; flex-shrink: 0;
+        }
+        .r-item .r-info { flex: 1; min-width: 0; }
+        .r-item .r-name {
+            font-size: 11px; font-weight: 600; color: #1e1e2a;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .r-item .r-cat { font-size: 9px; color: #8a8690; }
+        .r-item .r-score {
+            font-size: 13px; font-weight: 700; color: #d4480a; flex-shrink: 0;
+        }
+        .r-item .gain-tag {
+            font-size: 8px; padding: 2px 6px; border-radius: 3px;
+            font-weight: 600; flex-shrink: 0;
+        }
+        .gain-tag.high { background: rgba(46,170,155,0.1); color: #2eaa9b; }
+        .gain-tag.med { background: rgba(212,72,10,0.08); color: #d4480a; }
+        .gain-tag.low { background: rgba(140,135,150,0.1); color: #8a8690; }
+        /* ── GAM EXPLAINER ── */
+        .gam-panel {
+            border-top: 1px solid #e0ddd8;
+            background: #faf9f7;
+            flex-shrink: 0;
+            padding: 0;
+            overflow: hidden;
+            max-height: 0;
+            transition: max-height 0.4s ease, padding 0.4s ease;
+        }
+        .gam-panel.open {
+            max-height: 50vh;
+            padding: 10px 12px 8px;
+            overflow-y: auto;
+        }
+        .gam-header {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 6px;
+        }
+        .gam-header .gam-title {
+            font-size: 9px; letter-spacing: 2px; color: #8a8690;
+            text-transform: uppercase; font-weight: 600;
+        }
+        .gam-header .gam-context {
+            font-size: 9px; color: #b0aaa4;
+        }
+        .gam-curves {
+            display: flex; flex-direction: column; gap: 6px;
+        }
+        .gam-row {
+            display: flex; align-items: center; gap: 6px;
+        }
+        .gam-label {
+            width: 44px; font-size: 8px; font-weight: 600; color: #8a8690;
+            text-transform: uppercase; letter-spacing: 0.5px; text-align: right;
+            flex-shrink: 0;
+        }
+        .gam-curve-box {
+            flex: 1; height: 42px; background: #f0eeea; border-radius: 4px;
+            position: relative; overflow: hidden;
+        }
+        .gam-curve-box svg {
+            width: 100%; height: 100%;
+        }
+        .gam-val {
+            width: 26px; font-size: 10px; font-weight: 700; text-align: right;
+            flex-shrink: 0;
+        }
+        .gam-val.positive { color: #2eaa9b; }
+        .gam-val.medium { color: #d4a017; }
+        .gam-val.low { color: #e74c3c; }
+        .gam-tag {
+            font-size: 7px; letter-spacing: 0.5px;
+            padding: 1px 5px; border-radius: 2px;
+            font-weight: 600; flex-shrink: 0; width: 52px;
+            text-align: center; text-transform: uppercase;
+        }
+        .gam-tag.modular { background: #fdf2ee; color: #d4480a; }
+        .gam-tag.submod { background: #eef9f7; color: #2eaa9b; }
+        .gam-sum {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-top: 6px; padding-top: 6px; border-top: 1px solid #e8e5e0;
+        }
+        .gam-sum .gam-explain {
+            font-size: 9px; color: #8a8690; flex: 1;
+            line-height: 1.3;
+        }
+        .gam-sum .gam-explain em {
+            color: #1e1e2a; font-style: normal; font-weight: 600;
+        }
+        .gam-sum .gam-total {
+            font-size: 14px; font-weight: 700; color: #d4480a;
+            flex-shrink: 0; margin-left: 8px;
+        }
+        /* ── TABS ── */
+        .tab-bar {
+            display: flex; gap: 0; border-bottom: 1px solid #e0ddd8;
+            background: #fff; flex-shrink: 0; padding: 0 16px;
+        }
+        .tab-btn {
+            padding: 8px 18px; font-size: 12px; font-weight: 600;
+            color: #8a8690; background: none; border: none;
+            border-bottom: 2px solid transparent;
+            cursor: pointer; transition: all 0.2s;
+            font-family: 'DM Sans', sans-serif;
+            letter-spacing: 0.3px;
+        }
+        .tab-btn:hover { color: #1e1e2a; }
+        .tab-btn.active {
+            color: #d4480a; border-bottom-color: #d4480a;
+        }
+        .tab-content { display: none; flex: 1; flex-direction: column; overflow: hidden; }
+        .tab-content.active { display: flex; }
+        /* ── COMPARE TAB ── */
+        .compare-wrap {
+            flex: 1; display: flex; flex-direction: column;
+            overflow-y: auto; padding: 16px;
+            gap: 16px;
+        }
+        .compare-top {
+            display: flex; gap: 16px; align-items: flex-start;
+            flex-wrap: wrap;
+        }
+        .spider-box {
+            flex: 1; min-width: 280px; max-width: 420px;
+            background: #fff; border: 1px solid #e0ddd8; border-radius: 8px;
+            padding: 16px; text-align: center;
+        }
+        .spider-box h3 {
+            font-family: 'Playfair Display', serif;
+            font-size: 15px; margin-bottom: 10px; color: #1e1e2a;
+        }
+        .spider-svg { width: 100%; max-width: 360px; }
+        .spider-legend {
+            display: flex; gap: 12px; justify-content: center;
+            margin-top: 10px; flex-wrap: wrap;
+        }
+        .spider-legend-item {
+            display: flex; align-items: center; gap: 4px;
+            font-size: 10px; font-weight: 600; color: #555;
+        }
+        .spider-legend-dot {
+            width: 10px; height: 10px; border-radius: 50%;
+        }
+        .rankings-box {
+            flex: 1; min-width: 250px;
+            display: flex; flex-direction: column; gap: 12px;
+        }
+        .rank-col {
+            background: #fff; border: 1px solid #e0ddd8; border-radius: 8px;
+            padding: 12px;
+        }
+        .rank-col h4 {
+            font-size: 11px; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 1px; color: #8a8690; margin-bottom: 8px;
+        }
+        .rank-col h4 .dot {
+            display: inline-block; width: 8px; height: 8px;
+            border-radius: 50%; margin-right: 4px; vertical-align: middle;
+        }
+        .rank-item {
+            display: flex; align-items: center; gap: 6px;
+            padding: 3px 0; font-size: 11px; color: #1e1e2a;
+        }
+        .rank-item .ri-num {
+            width: 18px; height: 18px; border-radius: 50%;
+            background: #f0eeea; color: #8a8690;
+            font-size: 9px; font-weight: 700;
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
+        }
+        .rank-item .ri-icon { font-size: 13px; }
+        .rank-item .ri-name { flex: 1; }
+        .rank-item .ri-score {
+            font-size: 10px; font-weight: 700; color: #d4480a;
+        }
+        .metric-summary {
+            display: flex; flex-wrap: wrap; gap: 8px;
+            margin-top: 8px; padding-top: 8px; border-top: 1px solid #eae8e4;
+        }
+        .metric-pill {
+            padding: 3px 8px; border-radius: 10px;
+            font-size: 9px; font-weight: 600;
+            background: #f0eeea; color: #555;
+        }
+        .metric-pill.best { background: #eef9f7; color: #2eaa9b; }
+        /* ── BOTTOM BAR ── */
+        .bottom-bar {
+            flex-shrink: 0; padding: 8px 16px;
+            border-top: 1px solid #e0ddd8; background: #ffffff;
+            display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+        }
+        .score-section { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+        .score-label { font-size: 9px; letter-spacing: 1.5px; color: #8a8690; text-transform: uppercase; font-weight: 600; }
+        .score-value { font-size: 16px; font-weight: 700; color: #d4480a; }
+        .score-track { flex: 1; height: 5px; background: #eae8e4; border-radius: 3px; overflow: hidden; min-width: 60px; }
+        .score-fill { height: 100%; border-radius: 3px; background: linear-gradient(90deg, #d4480a, #2eaa9b); width: 0%; transition: width 0.8s ease-in-out; }
+        .cov-pills { display: flex; gap: 4px; flex-shrink: 0; flex-wrap: wrap; }
+        .cov-pill {
+            padding: 2px 7px; border-radius: 3px; font-size: 8px;
+            font-weight: 600; border: 1px solid #e0ddd8; color: #c4c0ca;
+            transition: all 0.4s; letter-spacing: 0.5px;
+        }
+        .cov-pill.active { border-color: currentColor; color: inherit; }
+        .eq-text { font-size: 9px; color: #c4c0ca; flex-shrink: 0; }
+        .eq-text .fn { color: #d4480a; }
+    </style>
+</head>
+<body>
+<div class="root">
+    <!-- TAB BAR -->
+    <div class="tab-bar">
+        <button class="tab-btn active" onclick="switchTab('anim')">Animation</button>
+        <button class="tab-btn" onclick="switchTab('compare')">Compare Strategies</button>
+    </div>
+    <!-- TAB 1: ANIMATION -->
+    <div class="tab-content active" id="tab-anim">
+    <!-- TOP BAR -->
+    <div class="top-bar">
+        <h1>Submodular GAM Reranking</h1>
+        <div class="top-right">
+            <div class="step-badge">Step <span id="stepNum">0</span>/8</div>
+            <button class="btn primary" id="btnStart" onclick="startAnimation()">Start</button>
+            <button class="btn" id="btnStep" onclick="stepOnce()">Step</button>
+            <button class="btn" id="btnReset" onclick="resetAnimation()" disabled>Reset</button>
+        </div>
+    </div>
+    <!-- NARRATOR -->
+    <div class="narrator">
+        <div class="icon">⚡</div>
+        <div class="nar-text">
+            <span class="msg" id="narMsg">Press Start to watch greedy submodular reranking.</span>
+            <span class="sub" id="narSub">Each step picks argmax f(e|S) — the stacked bar shows the breakdown.</span>
+        </div>
+    </div>
+    <!-- MAIN -->
+    <div class="main">
+        <!-- LEFT: Candidates -->
+        <div class="panel panel-left">
+            <div class="panel-hdr">
+                <span>Candidates — f(e|S)</span>
+                <div class="legend">
+                    <div class="legend-item"><div class="legend-dot" style="background:#e8622e;"></div>Rel</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#2eaa9b;"></div>Cat</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#3498db;"></div>Price</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#e84393;"></div>Style</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#d4a017;"></div>Season</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#6c5ce7;"></div>Fresh</div>
+                </div>
+            </div>
+            <div class="panel-scroll" id="itemsList"></div>
+        </div>
+        <!-- RIGHT: Reranked + GAM -->
+        <div class="panel panel-right">
+            <div class="panel-hdr"><span>Reranked</span></div>
+            <div class="panel-scroll" id="rerankedList"></div>
+            <div class="gam-panel" id="gamPanel">
+                <div class="gam-header">
+                    <span class="gam-title">Why this placement?</span>
+                    <span class="gam-context" id="gamContext">—</span>
+                </div>
+                <div class="gam-curves" id="gamCurves"></div>
+                <div class="gam-sum">
+                    <div class="gam-explain" id="gamExplain"></div>
+                    <div class="gam-total" id="gamTotal"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- BOTTOM BAR -->
+    <div class="bottom-bar">
+        <div class="score-section">
+            <span class="score-label">Score</span>
+            <span class="score-value" id="totalScore">0</span>
+        </div>
+        <div class="score-track"><div class="score-fill" id="scoreFill"></div></div>
+        <div class="cov-pills" id="covPills"></div>
+        <div class="eq-text"><span class="fn">f(k)</span> = Σ <span class="fn">hⱼ</span>(xⱼᵏ, xⱼᵏ⁻¹)</div>
+    </div>
+    </div><!-- end tab-anim -->
+    <!-- TAB 2: COMPARE -->
+    <div class="tab-content" id="tab-compare">
+        <div class="compare-wrap">
+            <div class="compare-top">
+                <div class="spider-box">
+                    <h3>Strategy Comparison — Radar</h3>
+                    <svg class="spider-svg" id="spiderSvg" viewBox="0 0 360 340"></svg>
+                    <div class="spider-legend">
+                        <div class="spider-legend-item"><div class="spider-legend-dot" style="background:#e74c3c;"></div>By Relevance</div>
+                        <div class="spider-legend-item"><div class="spider-legend-dot" style="background:#8a8690;"></div>Random</div>
+                        <div class="spider-legend-item"><div class="spider-legend-dot" style="background:#2eaa9b;"></div>GAM Greedy</div>
+                    </div>
+                </div>
+                <div class="rankings-box" id="rankingsBox"></div>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+// ═══════ DATA ═══════
+const CAT = {
+    dress:  { label:"Dress",  color:"#e74c3c", bg:"#fdf2f2", border:"#f5c6c6", icon:"👗" },
+    jacket: { label:"Jacket", color:"#2eaa9b", bg:"#eef9f7", border:"#b8e6df", icon:"🧥" },
+    pants:  { label:"Pants",  color:"#7c6bc4", bg:"#f3f1fa", border:"#d1cbe8", icon:"👖" },
+    shoes:  { label:"Shoes",  color:"#d4a017", bg:"#fdf8eb", border:"#f0dfa0", icon:"👢" },
+    bag:    { label:"Bag",    color:"#c56cf0", bg:"#f9f0fe", border:"#e4c6f7", icon:"👜" },
+    top:    { label:"Top",    color:"#3498db", bg:"#edf5fc", border:"#b8d8f5", icon:"👕" },
+};
+const items = [
+    { id:0, name:"Silk Midi Dress",        cat:"dress",  rel:95, div:80, fresh:90, season:"SS26" },
+    { id:1, name:"Cocktail Mini Dress",    cat:"dress",  rel:91, div:75, fresh:45, season:"SS26" },
+    { id:2, name:"Floral Wrap Dress",      cat:"dress",  rel:87, div:78, fresh:85, season:"SS26" },
+    { id:3, name:"Suede Ankle Boots",      cat:"shoes",  rel:56, div:80, fresh:30, season:"SS26" },
+    { id:4, name:"Leather Biker Jacket",   cat:"jacket", rel:52, div:82, fresh:60, season:"AW25" },
+    { id:5, name:"Oversized Blazer",       cat:"jacket", rel:48, div:79, fresh:65, season:"AW25" },
+    { id:6, name:"Slim Tailored Trousers", cat:"pants",  rel:42, div:84, fresh:55, season:"AW25" },
+    { id:7, name:"Quilted Tote Bag",       cat:"bag",    rel:35, div:76, fresh:92, season:"AW25" },
+];
+const FEAT = {
+    0: { price:89,  color:"black",  style:"elegant", age:18 },
+    1: { price:95,  color:"red",    style:"elegant", age:22 },
+    2: { price:79,  color:"floral", style:"elegant", age:20 },
+    3: { price:149, color:"tan",    style:"casual",  age:3  },
+    4: { price:199, color:"black",  style:"edgy",    age:1  },
+    5: { price:110, color:"grey",   style:"classic", age:2  },
+    6: { price:65,  color:"navy",   style:"classic", age:1  },
+    7: { price:45,  color:"cream",  style:"casual",  age:1  },
+};
+const GAM_FEATURES = [
+    {
+        key: 'relevance', label: 'Rel', type: 'modular',
+        fn: (it, prev) => {
+            return Math.round(40 + 45 * (it.rel / 100));
+        },
+        explain: (it, prev, val) => "Query match = " + val + " (modular — doesn't depend on prev)",
+    },
+    {
+        key: 'category', label: 'Cat Δ', type: 'submod',
+        fn: (it, prev) => {
+            if (!prev) return 40;
+            return it.cat === prev.cat ? 22 : 52;
+        },
+        explain: (it, prev, val) => {
+            if (!prev) return 'First position — no prior context';
+            const cat = CAT[it.cat].label;
+            const pcat = CAT[prev.cat].label;
+            return it.cat === prev.cat
+                ? cat + ' after ' + pcat + ' → <em>redundant</em>, curve at floor'
+                : cat + ' after ' + pcat + ' → <em>novel category</em>, curve at peak';
+        },
+    },
+    {
+        key: 'price', label: 'Price Δ', type: 'submod',
+        fn: (it, prev) => {
+            if (!prev) return 35;
+            const f = FEAT[it.id], fp = FEAT[prev.id];
+            const d = Math.abs(f.price - fp.price);
+            return Math.min(Math.round(22 + 25 * Math.sqrt(d / 160)), 50);
+        },
+        explain: (it, prev, val) => {
+            if (!prev) return 'First position';
+            const f = FEAT[it.id], fp = FEAT[prev.id];
+            const d = Math.abs(f.price - fp.price);
+            return d < 30
+                ? '€' + f.price + ' vs €' + fp.price + ' → <em>similar price</em>, low on concave curve'
+                : '€' + f.price + ' vs €' + fp.price + ' → <em>price jump</em>, high on concave curve';
+        },
+    },
+    {
+        key: 'style', label: 'Style Δ', type: 'submod',
+        fn: (it, prev) => {
+            if (!prev) return 35;
+            const s = FEAT[it.id].style, ps = FEAT[prev.id].style;
+            return s === ps ? 22 : 48;
+        },
+        explain: (it, prev, val) => {
+            if (!prev) return 'First position';
+            const s = FEAT[it.id].style, ps = FEAT[prev.id].style;
+            return s === ps
+                ? '"' + s + '" after "' + ps + '" → <em>same vibe</em>, low response'
+                : '"' + s + '" after "' + ps + '" → <em>fresh aesthetic</em>, high response';
+        },
+    },
+    {
+        key: 'season', label: 'Season', type: 'submod',
+        fn: (it, prev) => {
+            if (!prev) return 35;
+            return it.season === prev.season ? 28 : 42;
+        },
+        explain: (it, prev, val) => {
+            if (!prev) return 'First position';
+            return it.season === prev.season
+                ? it.season + ' after ' + prev.season + ' → <em>same collection</em>, diminished'
+                : it.season + ' after ' + prev.season + ' → <em>collection switch</em>, boosted';
+        },
+    },
+    {
+        key: 'age', label: 'Fresh', type: 'submod',
+        fn: (it, prev) => {
+            const age = FEAT[it.id].age;
+            const maxAge = 50;
+            const freshness = Math.max(0, maxAge - age) / maxAge;
+            return Math.round(25 + 30 * Math.pow(freshness, 0.5));
+        },
+        explain: (it, prev, val) => {
+            const age = FEAT[it.id].age;
+            return age <= 5
+                ? age + 'd old → <em>very fresh</em>, high on concave freshness curve'
+                : age <= 15
+                ? age + 'd old → <em>moderately fresh</em>, mid-curve'
+                : age + 'd old → <em>aging stock</em>, low on freshness curve (diminishing returns)';
+        },
+    },
+];
+const MAX_TOTAL = 330;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const SEG_KEYS = ['rel','cat','price','style','season','age'];
+let selectedIds = [];
+let selectedSeasons = [];
+let totalScore = 0;
+let stepCount = 0;
+let isRunning = false;
+let stepPhase = 'scan';
+let pendingItem = null;
+let pendingGain = 0;
+function gamValues(id) {
+    const it = items[id];
+    const lastSelId = selectedIds.length > 0 ? selectedIds[selectedIds.length - 1] : null;
+    const prev = lastSelId !== null ? items[lastSelId] : null;
+    return GAM_FEATURES.map(feat => feat.fn(it, prev));
+}
+function total(id) {
+    return gamValues(id).reduce((s, v) => s + v, 0);
+}
+function resetGains() {}
+function buildItems() {
+    const el = document.getElementById('itemsList');
+    el.innerHTML = '';
+    el.style.display = 'flex';
+    el.style.flexDirection = 'column';
+    items.forEach((it, idx) => {
+        const c = CAT[it.cat];
+        const vals = gamValues(it.id);
+        const t = vals.reduce((s, v) => s + v, 0);
+        const segs = SEG_KEYS.map((key, i) =>
+            '<div class="sb-seg s-' + key + '" id="seg-' + key + '-' + it.id + '" style="width:' + (vals[i]/MAX_TOTAL)*100 + '%"></div>'
+        ).join('');
+        el.innerHTML += '<div class="item-card" id="card-' + it.id + '" style="order:' + idx + '">' +
+            '<div class="rank-badge" id="rank-' + it.id + '">' + (idx+1) + '</div>' +
+            '<div class="ic-icon" style="background:' + c.bg + ';border:1px solid ' + c.border + ';">' + c.icon + '</div>' +
+            '<div class="ic-body">' +
+                '<div class="ic-name">' + it.name + '</div>' +
+                '<div class="ic-meta">' + c.label + ' · ' + it.season + ' · €' + FEAT[it.id].price + ' · ' + FEAT[it.id].age + 'd old</div>' +
+                '<div class="stacked-bar-wrap">' +
+                    '<div class="stacked-bar" id="sbar-' + it.id + '">' + segs + '</div>' +
+                    '<div class="sb-total" id="stotal-' + it.id + '">' + t + '</div>' +
+                '</div>' +
+            '</div>' +
+            '<div class="drop-label" id="drop-' + it.id + '"></div>' +
+            '<div class="skip-badge" id="skip-' + it.id + '"></div>' +
+        '</div>';
+    });
+}
+function buildReranked() {
+    const el = document.getElementById('rerankedList');
+    el.innerHTML = '';
+    for (let i = 0; i < items.length; i++) {
+        el.innerHTML += '<div class="r-item" id="ritem-' + i + '">' +
+            '<div class="r-pos">' + (i+1) + '</div>' +
+            '<div class="r-icon" id="ricon-' + i + '" style="background:#f5f4f1;border:1px solid #e0ddd8;"></div>' +
+            '<div class="r-info">' +
+                '<div class="r-name" id="rname-' + i + '">—</div>' +
+                '<div class="r-cat" id="rcat-' + i + '"></div>' +
+            '</div>' +
+            '<div class="r-score" id="rscore-' + i + '"></div>' +
+            '<div class="gain-tag" id="rtag-' + i + '"></div>' +
+        '</div>';
+    }
+}
+function buildCovPills() {
+    const el = document.getElementById('covPills');
+    el.innerHTML = '';
+    const usedCats = [...new Set(items.map(it => it.cat))];
+    usedCats.forEach(key => {
+        const c = CAT[key];
+        el.innerHTML += '<div class="cov-pill" id="pill-' + key + '" style="color:' + c.color + ';">' + c.label + '</div>';
+    });
+}
+function setNarrator(msg, sub) {
+    sub = sub || '';
+    document.getElementById('narMsg').textContent = msg;
+    document.getElementById('narSub').textContent = sub;
+}
+function updateBar(id) {
+    const vals = gamValues(id);
+    const t = vals.reduce((s, v) => s + v, 0);
+    SEG_KEYS.forEach((key, i) => {
+        document.getElementById('seg-' + key + '-' + id).style.width = (vals[i] / MAX_TOTAL * 100) + '%';
+    });
+    document.getElementById('stotal-' + id).textContent = t;
+}
+function flashBar(id) {
+    SEG_KEYS.forEach(key => {
+        const seg = document.getElementById('seg-' + key + '-' + id);
+        seg.style.backgroundColor = '#c0392b';
+        setTimeout(() => { seg.style.backgroundColor = ''; }, 500);
+    });
+}
+function highlightCard(id, on) {
+    document.getElementById('card-' + id).classList.toggle('highlight', on);
+}
+function scanCard(id, on) {
+    document.getElementById('card-' + id).classList.toggle('scanning', on);
+}
+function removeCard(id) {
+    document.getElementById('card-' + id).classList.add('selected');
+}
+function showDrop(id, txt) {
+    const el = document.getElementById('drop-' + id);
+    el.textContent = txt; el.classList.add('show');
+}
+function hideDrop(id) {
+    document.getElementById('drop-' + id).classList.remove('show');
+}
+function showSkip(id, txt) {
+    const el = document.getElementById('skip-' + id);
+    el.textContent = txt; el.classList.add('show');
+}
+function hideSkip(id) {
+    const el = document.getElementById('skip-' + id);
+    if (el) el.classList.remove('show');
+}
+async function resortList(animate) {
+    if (animate === undefined) animate = true;
+    const remaining = items.filter(it => !selectedIds.includes(it.id));
+    if (remaining.length <= 1) return;
+    const oldOrder = {};
+    remaining.forEach(it => {
+        oldOrder[it.id] = parseInt(document.getElementById('card-' + it.id).style.order) || 0;
+    });
+    remaining.sort((a, b) => total(b.id) - total(a.id));
+    if (!animate) {
+        remaining.forEach((it, idx) => {
+            const card = document.getElementById('card-' + it.id);
+            card.style.order = idx;
+            document.getElementById('rank-' + it.id).textContent = idx + 1;
+        });
+        return;
+    }
+    const firstRects = {};
+    remaining.forEach(it => {
+        firstRects[it.id] = document.getElementById('card-' + it.id).getBoundingClientRect();
+    });
+    remaining.forEach((it, idx) => {
+        const card = document.getElementById('card-' + it.id);
+        card.style.order = idx;
+    });
+    document.getElementById('itemsList').offsetHeight;
+    const movements = [];
+    remaining.forEach((it, newIdx) => {
+        const card = document.getElementById('card-' + it.id);
+        const lastRect = card.getBoundingClientRect();
+        const firstRect = firstRects[it.id];
+        const deltaY = firstRect.top - lastRect.top;
+        const oldIdx = oldOrder[it.id];
+        movements.push({ id: it.id, oldIdx: oldIdx, newIdx: newIdx, deltaY: deltaY, direction: newIdx < oldIdx ? 'up' : newIdx > oldIdx ? 'down' : 'same' });
+        if (Math.abs(deltaY) > 1) {
+            card.style.transform = 'translateY(' + deltaY + 'px)';
+        }
+    });
+    await sleep(100);
+    remaining.forEach(it => {
+        document.getElementById('card-' + it.id).classList.add('flipping');
+    });
+    await sleep(30);
+    remaining.forEach(it => {
+        document.getElementById('card-' + it.id).style.transform = '';
+    });
+    movements.forEach(m => {
+        const badge = document.getElementById('rank-' + m.id);
+        badge.textContent = m.newIdx + 1;
+        if (m.direction === 'up') badge.classList.add('moved-up');
+        else if (m.direction === 'down') badge.classList.add('moved-down');
+        if (m.direction !== 'same') document.getElementById('card-' + m.id).classList.add('resort-hl');
+    });
+    await sleep(700);
+    movements.forEach(m => {
+        const badge = document.getElementById('rank-' + m.id);
+        badge.classList.remove('moved-up', 'moved-down', 'moved-same');
+        document.getElementById('card-' + m.id).classList.remove('flipping', 'resort-hl');
+    });
+    await sleep(100);
+    return movements;
+}
+function getSortedRemaining() {
+    const remaining = items.filter(it => !selectedIds.includes(it.id));
+    remaining.sort((a, b) => total(b.id) - total(a.id));
+    return remaining;
+}
+function addReranked(slot, item, gain) {
+    const c = CAT[item.cat];
+    document.getElementById('ricon-' + slot).innerHTML = c.icon;
+    document.getElementById('ricon-' + slot).style.background = c.bg;
+    document.getElementById('ricon-' + slot).style.borderColor = c.border;
+    document.getElementById('rname-' + slot).textContent = item.name;
+    document.getElementById('rcat-' + slot).textContent = c.label + ' · €' + FEAT[item.id].price + ' · ' + FEAT[item.id].age + 'd';
+    document.getElementById('rscore-' + slot).textContent = gain;
+    const tag = document.getElementById('rtag-' + slot);
+    if (slot < 2) { tag.textContent = 'HIGH'; tag.className = 'gain-tag high'; }
+    else if (slot < 5) { tag.textContent = 'MED'; tag.className = 'gain-tag med'; }
+    else { tag.textContent = 'LOW'; tag.className = 'gain-tag low'; }
+    setTimeout(() => document.getElementById('ritem-' + slot).classList.add('visible'), 50);
+}
+function updateTotalScore(gain) {
+    totalScore += gain;
+    document.getElementById('totalScore').textContent = totalScore;
+    const max = items.reduce((s, it) => s + it.rel + it.div + it.fresh, 0);
+    document.getElementById('scoreFill').style.width = (totalScore / max * 100) + '%';
+}
+function activateCov(cat) {
+    const p = document.getElementById('pill-' + cat);
+    if (p) p.classList.add('active');
+}
+const CURVE_COLORS = {
+    relevance: '#e8622e', category: '#2eaa9b', price: '#3498db',
+    style: '#e84393', season: '#d4a017', age: '#6c5ce7',
+};
+const CURVE_SHAPES = {
+    relevance: () => { const pts = []; for (let i = 0; i <= 20; i++) { const x = i/20; pts.push({x01:x, y:40+45*x}); } return pts; },
+    category: () => { const pts = []; for (let i = 0; i <= 20; i++) { const x = i/20; const y = 52-30/(1+Math.exp(-12*(x-0.5))); pts.push({x01:x, y:Math.max(y,20)}); } return pts; },
+    price: () => { const pts = []; for (let i = 0; i <= 20; i++) { const x = i/20; const d = x*200; pts.push({x01:x, y:Math.min(22+25*Math.sqrt(d/160),50)}); } return pts; },
+    style: () => { const pts = []; for (let i = 0; i <= 20; i++) { const x = i/20; const y = 48-26/(1+Math.exp(-10*(x-0.5))); pts.push({x01:x, y:Math.max(y,20)}); } return pts; },
+    season: () => { const pts = []; for (let i = 0; i <= 20; i++) { const x = i/20; const y = 42-14/(1+Math.exp(-8*(x-0.5))); pts.push({x01:x, y:Math.max(y,26)}); } return pts; },
+    age: () => { const pts = []; for (let i = 0; i <= 20; i++) { const x = i/20; const f = Math.max(0,1-x); pts.push({x01:x, y:25+30*Math.pow(f,0.5)}); } return pts; },
+};
+function curveXPosition(feat, item, prevItem) {
+    switch (feat.key) {
+        case 'relevance': return item.rel / 100;
+        case 'category': if (!prevItem) return 0; return item.cat === prevItem.cat ? 1 : 0;
+        case 'price': if (!prevItem) return 0; return Math.min(Math.abs(FEAT[item.id].price - FEAT[prevItem.id].price) / 200, 1);
+        case 'style': if (!prevItem) return 0; return FEAT[item.id].style === FEAT[prevItem.id].style ? 1 : 0;
+        case 'season': if (!prevItem) return 0; return item.season === prevItem.season ? 1 : 0;
+        case 'age': return Math.min(FEAT[item.id].age / 50, 1);
+    }
+    return 0;
+}
+function curveXLabel(feat) {
+    switch (feat.key) {
+        case 'relevance': return ['low', 'high'];
+        case 'category': return ['diff', 'same'];
+        case 'price': return ['€0', '€200'];
+        case 'style': return ['diff', 'same'];
+        case 'season': return ['diff', 'same'];
+        case 'age': return ['0d ★', '50d'];
+    }
+    return ['', ''];
+}
+function renderGAMCurve(feat, item, prevItem) {
+    const val = feat.fn(item, prevItem);
+    const w = 100, h = 42;
+    const color = CURVE_COLORS[feat.key];
+    const shapePts = CURVE_SHAPES[feat.key]();
+    const xPos = curveXPosition(feat, item, prevItem);
+    const labels = curveXLabel(feat);
+    const polyPts = shapePts.map(p => {
+        const px = 4 + p.x01 * (w - 8);
+        const py = h - 8 - (p.y / 100) * (h - 14);
+        return px + ',' + py;
+    }).join(' ');
+    const firstPt = shapePts[0], lastPt = shapePts[shapePts.length - 1];
+    const fillPts = polyPts + ' ' + (4 + lastPt.x01 * (w - 8)) + ',' + (h - 8) + ' ' + (4 + firstPt.x01 * (w - 8)) + ',' + (h - 8);
+    const dotX = 4 + xPos * (w - 8);
+    const dotY = h - 8 - (val / 100) * (h - 14);
+    const curveSVG = '<polygon points="' + fillPts + '" fill="' + color + '" opacity="0.08"/>' +
+        '<polyline points="' + polyPts + '" fill="none" stroke="' + color + '" stroke-width="1.5" opacity="0.4"/>' +
+        '<line x1="' + dotX + '" y1="' + (h-8) + '" x2="' + dotX + '" y2="' + dotY + '" stroke="' + color + '" stroke-width="0.8" stroke-dasharray="2,1" opacity="0.35"/>' +
+        '<circle cx="' + dotX + '" cy="' + dotY + '" r="4" fill="' + color + '" stroke="#fff" stroke-width="1.2"/>' +
+        '<text x="' + (dotX > w-22 ? dotX-18 : dotX+7) + '" y="' + (dotY+3) + '" font-size="8" fill="' + color + '" font-weight="700" font-family="DM Sans">' + val + '</text>' +
+        '<text x="4" y="' + h + '" font-size="5.5" fill="#aaa" font-family="DM Sans">' + labels[0] + '</text>' +
+        '<text x="' + (w-4) + '" y="' + h + '" font-size="5.5" fill="#aaa" text-anchor="end" font-family="DM Sans">' + labels[1] + '</text>';
+    return { val: val, svg: '<svg viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none">' + curveSVG + '</svg>' };
+}
+function showGAM(item, prevItem) {
+    const panel = document.getElementById('gamPanel');
+    const curves = document.getElementById('gamCurves');
+    const explain = document.getElementById('gamExplain');
+    const totalEl = document.getElementById('gamTotal');
+    const ctx = document.getElementById('gamContext');
+    ctx.textContent = prevItem ? item.name + ' after ' + prevItem.name : item.name + ' (first position)';
+    let html = '';
+    let gamTotal = 0;
+    let bestExplain = '', worstExplain = '';
+    let bestVal = -1, worstVal = 999;
+    GAM_FEATURES.forEach(feat => {
+        const r = renderGAMCurve(feat, item, prevItem);
+        gamTotal += r.val;
+        const fcolor = CURVE_COLORS[feat.key];
+        const tagCls = feat.type === 'modular' ? 'modular' : 'submod';
+        html += '<div class="gam-row"><div class="gam-label">' + feat.label + '</div><div class="gam-curve-box">' + r.svg + '</div><div class="gam-val" style="color:' + fcolor + '">+' + r.val + '</div><div class="gam-tag ' + tagCls + '">' + tagCls + '</div></div>';
+        const expText = feat.explain(item, prevItem, r.val);
+        if (r.val > bestVal) { bestVal = r.val; bestExplain = expText; }
+        if (r.val < worstVal && feat.type !== 'modular') { worstVal = r.val; worstExplain = expText; }
+    });
+    curves.innerHTML = html;
+    explain.innerHTML = worstVal < 20 ? worstExplain : bestExplain;
+    totalEl.textContent = 'Σ ' + gamTotal;
+    panel.classList.add('open');
+}
+function hideGAM() {
+    document.getElementById('gamPanel').classList.remove('open');
+}
+function updateAllBars() {
+    items.forEach(it => { if (!selectedIds.includes(it.id)) updateBar(it.id); });
+}
+async function greedyScan() {
+    hideGAM();
+    stepCount++;
+    document.getElementById('stepNum').textContent = stepCount;
+    const remaining = items.filter(it => !selectedIds.includes(it.id));
+    if (remaining.length === 0) return;
+    const prevItem = selectedIds.length > 0 ? items[selectedIds[selectedIds.length - 1]] : null;
+    const isFirstStep = stepCount === 1;
+    let candidates = [...remaining];
+    candidates.sort((a, b) => {
+        const oa = parseInt(document.getElementById('card-' + a.id).style.order) || 0;
+        const ob = parseInt(document.getElementById('card-' + b.id).style.order) || 0;
+        return oa - ob;
+    });
+    setNarrator(
+        'Step ' + stepCount + ': ' + (isFirstStep ? 'Evaluating all candidates…' : 'Prev changed → scanning top-down, recomputing true GAM values…'),
+        isFirstStep ? 'Computing h(· | ∅) for each item. Pick the highest.' : 'Bars show old scores. Recomputing h(· | ' + prevItem.name + ') one by one…'
+    );
+    await sleep(800);
+    let bestItem = null, bestGain = 0, scannedCount = 0, skippedCount = 0;
+    if (isFirstStep) {
+        updateAllBars();
+        candidates.sort((a, b) => total(b.id) - total(a.id));
+        await resortList(true);
+        await sleep(300);
+        for (const cand of candidates) { scanCard(cand.id, true); await sleep(140); scanCard(cand.id, false); }
+        bestItem = candidates[0];
+        bestGain = total(candidates[0].id);
+        scannedCount = candidates.length;
+        highlightCard(bestItem.id, true);
+    } else {
+        let found = false;
+        while (!found && candidates.length > 0) {
+            const top = candidates[0];
+            scannedCount++;
+            scanCard(top.id, true);
+            const staleGain = parseInt(document.getElementById('stotal-' + top.id).textContent) || 0;
+            setNarrator('Checking #' + scannedCount + ': ' + top.name + ' (stale: ' + staleGain + ')…', 'Recomputing with new prev = ' + prevItem.name + '. Watch the bar change.');
+            await sleep(500);
+            const trueGain = total(top.id);
+            updateBar(top.id);
+            await sleep(400);
+            const dropped = staleGain - trueGain;
+            if (dropped > 5) { showDrop(top.id, trueGain + ' (was ' + staleGain + ')'); flashBar(top.id); await sleep(500); hideDrop(top.id); }
+            else if (dropped < -5) { showDrop(top.id, '↑ ' + trueGain + ' (was ' + staleGain + ')'); await sleep(400); hideDrop(top.id); }
+            const nextStale = candidates.length > 1 ? parseInt(document.getElementById('stotal-' + candidates[1].id).textContent) || 0 : 0;
+            if (trueGain >= nextStale) {
+                found = true; bestItem = top; bestGain = trueGain; skippedCount = candidates.length - 1;
+                scanCard(top.id, false); highlightCard(top.id, true);
+                if (skippedCount > 0) {
+                    setNarrator('⚡ ' + top.name + ' (' + trueGain + ') ≥ next stale bound (' + nextStale + ')', 'Safe to skip ' + skippedCount + ' items — their true values can only drop further!');
+                    for (let j = 1; j < candidates.length; j++) showSkip(candidates[j].id, '⚡ SKIPPED');
+                    await sleep(1800);
+                    for (let j = 1; j < candidates.length; j++) hideSkip(candidates[j].id);
+                }
+            } else {
+                scanCard(top.id, false); hideDrop(top.id);
+                setNarrator(top.name + ' dropped to ' + trueGain + ' < next stale (' + nextStale + ') — resorting…', 'Watch it slide down as a new candidate rises to the top.');
+                const flipFirst = {};
+                candidates.forEach(c => { flipFirst[c.id] = document.getElementById('card-' + c.id).getBoundingClientRect(); });
+                const recomputed = new Set();
+                for (let k = 0; k < scannedCount && k < candidates.length; k++) recomputed.add(candidates[k].id);
+                candidates.sort((a, b) => {
+                    const ga = recomputed.has(a.id) ? total(a.id) : (parseInt(document.getElementById('stotal-' + a.id).textContent) || 0);
+                    const gb = recomputed.has(b.id) ? total(b.id) : (parseInt(document.getElementById('stotal-' + b.id).textContent) || 0);
+                    return gb - ga;
+                });
+                candidates.forEach((c, idx) => { document.getElementById('card-' + c.id).style.order = idx; });
+                document.getElementById('itemsList').offsetHeight;
+                candidates.forEach(c => {
+                    const card = document.getElementById('card-' + c.id);
+                    const lastRect = card.getBoundingClientRect();
+                    const deltaY = flipFirst[c.id].top - lastRect.top;
+                    if (Math.abs(deltaY) > 1) card.style.transform = 'translateY(' + deltaY + 'px)';
+                });
+                await sleep(30);
+                candidates.forEach(c => { const card = document.getElementById('card-' + c.id); card.classList.add('flipping'); card.style.transform = ''; });
+                candidates.forEach((c, idx) => {
+                    const badge = document.getElementById('rank-' + c.id);
+                    const oldRank = parseInt(badge.textContent);
+                    badge.textContent = idx + 1;
+                    if (idx + 1 < oldRank) badge.classList.add('moved-up');
+                    else if (idx + 1 > oldRank) badge.classList.add('moved-down');
+                });
+                await sleep(700);
+                candidates.forEach(c => {
+                    document.getElementById('card-' + c.id).classList.remove('flipping');
+                    const badge = document.getElementById('rank-' + c.id);
+                    badge.classList.remove('moved-up', 'moved-down');
+                });
+                await sleep(150);
+            }
+        }
+    }
+    remaining.forEach(it => scanCard(it.id, false));
+    const item = bestItem;
+    const c = CAT[item.cat];
+    const vals = gamValues(item.id);
+    const gain = bestGain;
+    const isNewCat = !selectedIds.some(sid => items[sid].cat === item.cat);
+    const breakdown = GAM_FEATURES.map((f, i) => f.label + ':' + vals[i]).join(' + ');
+    setNarrator(
+        'Winner → ' + item.name + '  [' + breakdown + ' = ' + gain + ']',
+        isFirstStep ? 'First pick — all GAM curves at baseline.'
+            : skippedCount > 0 ? (isNewCat ? 'New category "' + c.label + '"! ' : '') + 'Checked ' + scannedCount + '/' + remaining.length + ', skipped ' + skippedCount + '.'
+            : isNewCat ? 'New category "' + c.label + '" — diversity curves paid off!'
+            : 'Checked ' + scannedCount + ' candidates.'
+    );
+    await sleep(1000);
+    showGAM(item, prevItem);
+    setNarrator(
+        'GAM: why ' + item.name + ' here? Press CONFIRM ▸ to place it.',
+        prevItem ? 'h(' + item.name + ' | prev=' + prevItem.name + ') — inspect each curve ↘' : 'First position — all response curves at baseline ↘'
+    );
+    await sleep(400);
+    pendingItem = item;
+    pendingGain = gain;
+}
+async function greedySelect() {
+    const item = pendingItem;
+    if (!item) return;
+    const gain = pendingGain;
+    hideGAM();
+    highlightCard(item.id, false);
+    removeCard(item.id);
+    selectedIds.push(item.id);
+    selectedSeasons.push(item.season);
+    activateCov(item.cat);
+    addReranked(stepCount - 1, item, gain);
+    updateTotalScore(gain);
+    await sleep(500);
+    const stillRemaining = items.filter(it => !selectedIds.includes(it.id));
+    if (stillRemaining.length === 0) return;
+    setNarrator('Placed ' + item.name + '. Bars still show old scores — next step will recompute.', 'New prev = ' + item.name + '. Watch how GAM values shift on the next scan.');
+    await sleep(500);
+    pendingItem = null;
+}
+async function startAnimation() {
+    if (isRunning) return;
+    isRunning = true;
+    document.getElementById('btnStart').disabled = true;
+    document.getElementById('btnStep').disabled = true;
+    document.getElementById('btnReset').disabled = true;
+    while (selectedIds.length < items.length) {
+        await greedyScan();
+        await sleep(800);
+        await greedySelect();
+    }
+    setNarrator('✓ Reranking complete — diversity & freshness maximized!', 'GAM response curves drove category/style/price interleaving. Each placement was optimal given its predecessor.');
+    hideGAM();
+    isRunning = false;
+    document.getElementById('btnReset').disabled = false;
+}
+async function stepOnce() {
+    if (selectedIds.length >= items.length) return;
+    document.getElementById('btnStart').disabled = true;
+    document.getElementById('btnStep').disabled = true;
+    if (stepPhase === 'scan') {
+        await greedyScan();
+        stepPhase = 'select';
+        document.getElementById('btnStep').disabled = false;
+        document.getElementById('btnStep').textContent = 'CONFIRM ▸';
+        document.getElementById('btnStep').classList.add('primary');
+    } else {
+        await greedySelect();
+        stepPhase = 'scan';
+        document.getElementById('btnStep').textContent = 'STEP';
+        document.getElementById('btnStep').classList.remove('primary');
+        if (selectedIds.length >= items.length) {
+            setNarrator('✓ Reranking complete!', 'Modular rel constant. Submodular features drove interleaving. GAM curves explained every placement.');
+        } else {
+            document.getElementById('btnStep').disabled = false;
+        }
+    }
+    document.getElementById('btnReset').disabled = false;
+}
+function resetAnimation() {
+    isRunning = false;
+    selectedIds = []; selectedSeasons = [];
+    totalScore = 0; stepCount = 0;
+    stepPhase = 'scan'; pendingItem = null;
+    hideGAM(); resetGains();
+    buildItems(); resortList(false); buildReranked(); buildCovPills();
+    document.getElementById('stepNum').textContent = '0';
+    document.getElementById('totalScore').textContent = '0';
+    document.getElementById('scoreFill').style.width = '0%';
+    setNarrator('Press Start to watch greedy submodular reranking.', 'Each step picks argmax f(e|S) — the stacked bar shows the breakdown.');
+    document.getElementById('btnStart').disabled = false;
+    document.getElementById('btnStep').disabled = false;
+    document.getElementById('btnStep').textContent = 'STEP';
+    document.getElementById('btnStep').classList.remove('primary');
+    document.getElementById('btnReset').disabled = true;
+}
+function switchTab(tabId) {
+    document.querySelectorAll('.tab-btn').forEach((btn, i) => {
+        btn.classList.toggle('active', (tabId === 'anim' && i === 0) || (tabId === 'compare' && i === 1));
+    });
+    document.querySelectorAll('.tab-content').forEach(tc => tc.classList.remove('active'));
+    document.getElementById('tab-' + tabId).classList.add('active');
+    if (tabId === 'compare') buildComparison();
+}
+function runStrategy(name) {
+    if (name === 'relevance') return [...items].sort((a, b) => b.rel - a.rel).map(it => it.id);
+    if (name === 'random') {
+        const arr = items.map(it => it.id);
+        for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; }
+        return arr;
+    }
+    const sel = [];
+    const rem = new Set(items.map(it => it.id));
+    for (let step = 0; step < items.length; step++) {
+        let bestId = -1, bestScore = -1;
+        for (const id of rem) {
+            const it = items[id];
+            const prev = sel.length > 0 ? items[sel[sel.length - 1]] : null;
+            const score = GAM_FEATURES.reduce((s, f) => s + f.fn(it, prev), 0);
+            if (score > bestScore) { bestScore = score; bestId = id; }
+        }
+        sel.push(bestId); rem.delete(bestId);
+    }
+    return sel;
+}
+function computeMetrics(ranking) {
+    const K = 4;
+    const its = ranking.map(id => items[id]);
+    const topK = its.slice(0, K);
+    const maxRel = [...items].sort((a, b) => b.rel - a.rel).slice(0, K).reduce((s, it) => s + it.rel, 0) / K;
+    const avgRel = topK.reduce((s, it) => s + it.rel, 0) / K;
+    const relScore = Math.round((avgRel / maxRel) * 100);
+    let catSwitches = 0;
+    for (let i = 1; i < K; i++) if (topK[i].cat !== topK[i - 1].cat) catSwitches++;
+    const catDiv = Math.round((catSwitches / (K - 1)) * 100);
+    let priceScore = 0;
+    for (let i = 1; i < K; i++) { const d = Math.abs(FEAT[topK[i].id].price - FEAT[topK[i - 1].id].price); priceScore += Math.min(22 + 25 * Math.sqrt(d / 160), 50); }
+    priceScore = Math.round((priceScore / ((K - 1) * 50)) * 100);
+    let styleSwitches = 0;
+    for (let i = 1; i < K; i++) if (FEAT[topK[i].id].style !== FEAT[topK[i - 1].id].style) styleSwitches++;
+    const styleDiv = Math.round((styleSwitches / (K - 1)) * 100);
+    const seasons = new Set(topK.map(it => it.season));
+    const allSeasons = new Set(items.map(it => it.season));
+    const seasonMix = Math.round((seasons.size / allSeasons.size) * 100);
+    const freshFn = (it) => { const f = Math.max(0, 50 - FEAT[it.id].age) / 50; return 25 + 30 * Math.pow(f, 0.5); };
+    const maxFresh = [...items].sort((a, b) => freshFn(b) - freshFn(a)).slice(0, K).reduce((s, it) => s + freshFn(it), 0) / K;
+    const avgFresh = topK.reduce((s, it) => s + freshFn(it), 0) / K;
+    const freshScore = Math.round((avgFresh / maxFresh) * 100);
+    return { 'Rel@4': relScore, 'Cat@4': catDiv, 'Price@4': priceScore, 'Style@4': styleDiv, 'Season@4': seasonMix, 'Fresh@4': freshScore };
+}
+function drawSpider(strategies) {
+    const svg = document.getElementById('spiderSvg');
+    const cx = 180, cy = 160, r = 120;
+    const axes = Object.keys(strategies[0].metrics);
+    const n = axes.length;
+    const colors = ['#e74c3c', '#8a8690', '#2eaa9b'];
+    const fills = ['rgba(231,76,60,0.12)', 'rgba(138,134,144,0.08)', 'rgba(46,170,155,0.18)'];
+    const axPt = (i, val) => { const angle = (Math.PI * 2 * i / n) - Math.PI / 2; const dist = (val / 100) * r; return { x: cx + dist * Math.cos(angle), y: cy + dist * Math.sin(angle) }; };
+    let html = '';
+    for (let ring = 20; ring <= 100; ring += 20) {
+        const pts = []; for (let i = 0; i < n; i++) { const p = axPt(i, ring); pts.push(p.x + ',' + p.y); }
+        html += '<polygon points="' + pts.join(' ') + '" fill="none" stroke="#e0ddd8" stroke-width="' + (ring === 100 ? 1.2 : 0.6) + '"/>';
+        const lp = axPt(0, ring);
+        html += '<text x="' + (lp.x + 3) + '" y="' + (lp.y - 3) + '" font-size="7" fill="#bbb" font-family="DM Sans">' + ring + '</text>';
+    }
+    for (let i = 0; i < n; i++) {
+        const p = axPt(i, 100);
+        html += '<line x1="' + cx + '" y1="' + cy + '" x2="' + p.x + '" y2="' + p.y + '" stroke="#d4d0cc" stroke-width="0.6"/>';
+        const lp = axPt(i, 118);
+        const anchor = lp.x < cx - 10 ? 'end' : lp.x > cx + 10 ? 'start' : 'middle';
+        html += '<text x="' + lp.x + '" y="' + (lp.y + 4) + '" font-size="9" font-weight="600" fill="#555" text-anchor="' + anchor + '" font-family="DM Sans">' + axes[i] + '</text>';
+    }
+    for (let si = strategies.length - 1; si >= 0; si--) {
+        const strat = strategies[si];
+        const vals = axes.map(a => strat.metrics[a]);
+        const pts = []; for (let i = 0; i < n; i++) { const p = axPt(i, vals[i]); pts.push(p.x + ',' + p.y); }
+        html += '<polygon points="' + pts.join(' ') + '" fill="' + fills[si] + '" stroke="' + colors[si] + '" stroke-width="2" stroke-linejoin="round"/>';
+        for (let i = 0; i < n; i++) { const p = axPt(i, vals[i]); html += '<circle cx="' + p.x + '" cy="' + p.y + '" r="3.5" fill="' + colors[si] + '" stroke="#fff" stroke-width="1.2"/>'; }
+    }
+    svg.innerHTML = html;
+}
+function buildComparison() {
+    const stratDefs = [
+        { name: 'By Relevance', key: 'relevance', color: '#e74c3c' },
+        { name: 'Random', key: 'random', color: '#8a8690' },
+        { name: 'GAM Greedy', key: 'gam', color: '#2eaa9b' },
+    ];
+    const strategies = stratDefs.map(sd => { const ranking = runStrategy(sd.key); return Object.assign({}, sd, { ranking: ranking, metrics: computeMetrics(ranking) }); });
+    drawSpider(strategies);
+    const box = document.getElementById('rankingsBox');
+    box.innerHTML = '';
+    const axes = Object.keys(strategies[0].metrics);
+    const bestPerMetric = {};
+    axes.forEach(a => { let best = -1, bestIdx = 0; strategies.forEach((s, i) => { if (s.metrics[a] > best) { best = s.metrics[a]; bestIdx = i; } }); bestPerMetric[a] = bestIdx; });
+    strategies.forEach((strat, si) => {
+        const col = document.createElement('div');
+        col.className = 'rank-col';
+        let itemsHtml = strat.ranking.map((id, i) => {
+            const it = items[id]; const c = CAT[it.cat];
+            return '<div class="rank-item"><div class="ri-num">' + (i+1) + '</div><div class="ri-icon">' + c.icon + '</div><div class="ri-name">' + it.name + '</div><div class="ri-score">€' + FEAT[id].price + ' · ' + FEAT[id].age + 'd</div></div>';
+        }).join('');
+        let metricsHtml = axes.map(a => '<div class="metric-pill ' + (bestPerMetric[a] === si ? 'best' : '') + '">' + a + ': ' + strat.metrics[a] + '</div>').join('');
+        col.innerHTML = '<h4><span class="dot" style="background:' + strat.color + '"></span>' + strat.name + '</h4>' + itemsHtml + '<div class="metric-summary">' + metricsHtml + '</div>';
+        box.appendChild(col);
+    });
+}
+resetGains(); buildItems(); resortList(false); buildReranked(); buildCovPills();
+</script>
+</body>
+</html>
