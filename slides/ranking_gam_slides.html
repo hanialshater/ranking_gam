@@ -1,0 +1,2281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Interpretable Learning-to-Rank with GAMs</title>
+<link rel="stylesheet" href="https://unpkg.com/reveal.js@5.1.0/dist/reveal.css">
+<link rel="stylesheet" href="https://unpkg.com/reveal.js@5.1.0/dist/theme/white.css">
+<link rel="stylesheet" href="https://unpkg.com/reveal.js@5.1.0/plugin/highlight/monokai.css">
+<style>
+:root {
+  --blue: #2563eb; --blue-light: #93c5fd; --blue-bg: #eff6ff;
+  --green: #16a34a; --green-light: #86efac; --green-bg: #f0fdf4;
+  --orange: #ea580c; --orange-light: #fdba74; --orange-bg: #fff7ed;
+  --purple: #9333ea; --purple-light: #c4b5fd; --purple-bg: #faf5ff;
+  --red: #dc2626; --gray: #6b7280; --gray-light: #e5e7eb;
+}
+.reveal { font-size: 28px; }
+.reveal h1 { font-size: 2.0em; color: var(--blue); }
+.reveal h2 { font-size: 1.5em; color: #1e293b; }
+.reveal h3 { font-size: 1.2em; color: var(--gray); }
+.reveal .slide-number { font-size: 14px; }
+.reveal section { text-align: left; }
+.reveal .center { text-align: center; }
+.reveal pre { font-size: 0.55em; width: 100%; }
+.reveal code { font-size: 0.9em; }
+.reveal ul { font-size: 0.85em; }
+.reveal .small { font-size: 0.7em; }
+.reveal .eq { font-family: 'Georgia', serif; font-size: 1.1em; color: #1e293b;
+  background: var(--blue-bg); padding: 12px 20px; border-radius: 8px;
+  text-align: center; margin: 15px 0; border-left: 4px solid var(--blue); }
+.reveal .eq-green { font-family: 'Georgia', serif; font-size: 1.1em;
+  background: var(--green-bg); padding: 12px 20px; border-radius: 8px;
+  text-align: center; margin: 15px 0; border-left: 4px solid var(--green); }
+.reveal .eq-orange { font-family: 'Georgia', serif; font-size: 1.1em;
+  background: var(--orange-bg); padding: 12px 20px; border-radius: 8px;
+  text-align: center; margin: 15px 0; border-left: 4px solid var(--orange); }
+.reveal .eq-purple { font-family: 'Georgia', serif; font-size: 1.1em;
+  background: var(--purple-bg); padding: 12px 20px; border-radius: 8px;
+  text-align: center; margin: 15px 0; border-left: 4px solid var(--purple); }
+.reveal .box { background: #f8fafc; border: 1px solid var(--gray-light);
+  border-radius: 8px; padding: 15px; margin: 10px 0; }
+.reveal .box-blue { background: var(--blue-bg); border: 1px solid var(--blue-light);
+  border-radius: 8px; padding: 15px; margin: 10px 0; }
+.reveal .box-green { background: var(--green-bg); border: 1px solid var(--green-light);
+  border-radius: 8px; padding: 15px; margin: 10px 0; }
+.reveal .two-col { display: flex; gap: 30px; align-items: flex-start; }
+.reveal .two-col > div { flex: 1; }
+.reveal .badge { display: inline-block; padding: 2px 10px; border-radius: 12px;
+  font-size: 0.7em; font-weight: 600; margin: 2px; }
+.reveal .badge-blue { background: var(--blue-light); color: #1e40af; }
+.reveal .badge-green { background: var(--green-light); color: #166534; }
+.reveal .badge-orange { background: var(--orange-light); color: #9a3412; }
+.reveal .badge-purple { background: var(--purple-light); color: #6b21a8; }
+.reveal table { font-size: 0.7em; margin: 10px auto; border-collapse: collapse; }
+.reveal th { background: var(--blue); color: white; padding: 8px 12px; }
+.reveal td { padding: 6px 12px; border-bottom: 1px solid var(--gray-light); }
+.reveal tr:nth-child(even) { background: #f8fafc; }
+svg text { font-family: system-ui, -apple-system, sans-serif; }
+</style>
+</head>
+<body>
+<div class="reveal">
+<div class="slides">
+<!-- ==================== SECTION 1: INTRODUCTION ==================== -->
+
+<!-- Slide 1: Title -->
+<section class="center">
+  <h1 style="font-size:2.2em;">Interpretable Learning-to-Rank<br>with GAMs</h1>
+  <h3 style="color:var(--gray);">ranking_gam Library — Knowledge Sharing</h3>
+  <p class="small" style="margin-top:40px; color:var(--gray);">
+    Based on Zhuang et al. "Interpretable Ranking with Generalized Additive Models" (WSDM 2021)<br>
+    Extended with GA2M, Context Weighting, Submodular Diversity, Multi-Objective, and Java Inference
+  </p>
+</section>
+
+<!-- Slide 2: Problem Statement -->
+<section>
+  <h2>Why Interpretable Ranking?</h2>
+  <div class="two-col">
+    <div>
+      <ul>
+        <li><strong>Black-box models</strong> (LambdaMART, deep nets) achieve top NDCG but offer no insight into <em>why</em></li>
+        <li class="fragment"><strong>Interpretability matters</strong> for debugging, fairness audits, stakeholder trust, and regulatory compliance</li>
+        <li class="fragment"><strong>GAMs</strong> decompose the score into per-feature contributions you can visualize and reason about</li>
+      </ul>
+    </div>
+    <div class="center fragment">
+      <svg width="380" height="280" viewBox="0 0 380 280">
+        <!-- Axes -->
+        <line x1="50" y1="240" x2="360" y2="240" stroke="#94a3b8" stroke-width="2"/>
+        <line x1="50" y1="240" x2="50" y2="20" stroke="#94a3b8" stroke-width="2"/>
+        <text x="200" y="270" text-anchor="middle" fill="#64748b" font-size="13">Interpretability</text>
+        <text x="18" y="130" text-anchor="middle" fill="#64748b" font-size="13" transform="rotate(-90,18,130)">NDCG</text>
+        <!-- Points -->
+        <circle cx="80" cy="40" r="10" fill="#dc2626" opacity="0.8"/>
+        <text x="80" y="37" text-anchor="middle" fill="white" font-size="9" font-weight="600">DNN</text>
+        <circle cx="120" cy="55" r="10" fill="#dc2626" opacity="0.7"/>
+        <text x="120" y="52" text-anchor="middle" fill="white" font-size="8" font-weight="600">MART</text>
+        <circle cx="200" cy="70" r="14" fill="var(--blue)" opacity="0.9"/>
+        <text x="200" y="67" text-anchor="middle" fill="white" font-size="8" font-weight="700">GAM</text>
+        <circle cx="260" cy="65" r="14" fill="var(--orange)" opacity="0.9"/>
+        <text x="260" y="62" text-anchor="middle" fill="white" font-size="7" font-weight="700">CtxGAM</text>
+        <circle cx="320" cy="160" r="10" fill="var(--green)" opacity="0.7"/>
+        <text x="320" y="157" text-anchor="middle" fill="white" font-size="8" font-weight="600">Linear</text>
+        <!-- Sweet spot region -->
+        <ellipse cx="230" cy="70" rx="70" ry="30" fill="none" stroke="var(--blue)" stroke-width="2" stroke-dasharray="6,3"/>
+        <text x="230" y="115" text-anchor="middle" fill="var(--blue)" font-size="12" font-weight="600">Sweet Spot</text>
+      </svg>
+    </div>
+  </div>
+</section>
+
+<!-- Slide 3: Library Overview -->
+<section>
+  <h2>Library Architecture</h2>
+  <div class="center">
+    <svg width="700" height="340" viewBox="0 0 700 340">
+      <!-- Stack of model layers -->
+      <rect x="100" y="10" width="500" height="50" rx="8" fill="var(--purple)" opacity="0.85"/>
+      <text x="350" y="40" text-anchor="middle" fill="white" font-size="15" font-weight="600">MultiObjectiveRankingGAM</text>
+
+      <rect x="100" y="68" width="500" height="50" rx="8" fill="var(--green)" opacity="0.85"/>
+      <text x="350" y="98" text-anchor="middle" fill="white" font-size="15" font-weight="600">SubmodularRankingGAM (Diversity Reranking)</text>
+
+      <rect x="100" y="126" width="500" height="50" rx="8" fill="var(--orange)" opacity="0.85"/>
+      <text x="350" y="156" text-anchor="middle" fill="white" font-size="15" font-weight="600">ContextGAM / ContextPresentGA2M</text>
+
+      <rect x="100" y="184" width="500" height="50" rx="8" fill="#3b82f6" opacity="0.85"/>
+      <text x="350" y="214" text-anchor="middle" fill="white" font-size="15" font-weight="600">GA2M (+ Pairwise Interactions)</text>
+
+      <rect x="100" y="242" width="500" height="50" rx="8" fill="var(--blue)" opacity="0.95"/>
+      <text x="350" y="272" text-anchor="middle" fill="white" font-size="16" font-weight="700">GAM_Paper (Base Model)</text>
+
+      <!-- Arrow labels on right -->
+      <text x="620" y="272" text-anchor="start" fill="var(--blue)" font-size="11">Simplest</text>
+      <text x="620" y="40" text-anchor="start" fill="var(--purple)" font-size="11">Most flexible</text>
+      <line x1="630" y1="55" x2="630" y2="260" stroke="var(--gray)" stroke-width="1.5" marker-start="url(#arrowUp)" marker-end="url(#arrowDown)"/>
+      <defs>
+        <marker id="arrowUp" markerWidth="8" markerHeight="6" refX="4" refY="6" orient="auto"><path d="M0,6 L4,0 L8,6" fill="var(--gray)"/></marker>
+        <marker id="arrowDown" markerWidth="8" markerHeight="6" refX="4" refY="0" orient="auto"><path d="M0,0 L4,6 L8,0" fill="var(--gray)"/></marker>
+      </defs>
+
+      <!-- Side labels -->
+      <text x="75" y="272" text-anchor="end" fill="var(--gray)" font-size="10">models/gam.py</text>
+      <text x="75" y="214" text-anchor="end" fill="var(--gray)" font-size="10">models/gam.py</text>
+      <text x="75" y="156" text-anchor="end" fill="var(--gray)" font-size="10">models/context.py</text>
+      <text x="75" y="98" text-anchor="end" fill="var(--gray)" font-size="10">models/submodular.py</text>
+      <text x="75" y="40" text-anchor="end" fill="var(--gray)" font-size="10">models/multi_objective.py</text>
+
+      <!-- Bottom caption -->
+      <text x="350" y="320" text-anchor="middle" fill="var(--gray)" font-size="12">Each layer adds capability while preserving interpretability of layers below</text>
+    </svg>
+  </div>
+</section>
+<!-- ==================== SECTION 2: BUILDING BLOCKS — TOWERS ==================== -->
+
+<!-- Slide 4: What is a Tower? -->
+<section>
+  <h2>What is a Tower?</h2>
+  <p>A <strong>tower</strong> is a small neural network that processes a <em>single feature</em> and outputs a scalar score contribution.</p>
+  <div class="center" style="margin-top:20px;">
+    <svg width="650" height="160" viewBox="0 0 650 160">
+      <!-- Input -->
+      <rect x="10" y="55" width="70" height="40" rx="6" fill="var(--blue-bg)" stroke="var(--blue)" stroke-width="2"/>
+      <text x="45" y="80" text-anchor="middle" fill="var(--blue)" font-size="14" font-weight="600">x_j</text>
+
+      <!-- Arrow -->
+      <line x1="85" y1="75" x2="115" y2="75" stroke="var(--gray)" stroke-width="2" marker-end="url(#arrowRight)"/>
+
+      <!-- Dense 1 -->
+      <rect x="120" y="45" width="80" height="55" rx="6" fill="var(--blue)" opacity="0.15" stroke="var(--blue)" stroke-width="1.5"/>
+      <text x="160" y="68" text-anchor="middle" fill="var(--blue)" font-size="12" font-weight="600">Dense</text>
+      <text x="160" y="85" text-anchor="middle" fill="var(--blue)" font-size="11">1 &rarr; 16</text>
+
+      <line x1="205" y1="75" x2="225" y2="75" stroke="var(--gray)" stroke-width="2" marker-end="url(#arrowRight)"/>
+
+      <!-- Activation -->
+      <rect x="230" y="50" width="60" height="45" rx="20" fill="var(--orange)" opacity="0.2" stroke="var(--orange)" stroke-width="1.5"/>
+      <text x="260" y="78" text-anchor="middle" fill="var(--orange)" font-size="12" font-weight="600">SiLU</text>
+
+      <line x1="295" y1="75" x2="315" y2="75" stroke="var(--gray)" stroke-width="2" marker-end="url(#arrowRight)"/>
+
+      <!-- Dense 2 -->
+      <rect x="320" y="45" width="80" height="55" rx="6" fill="var(--blue)" opacity="0.15" stroke="var(--blue)" stroke-width="1.5"/>
+      <text x="360" y="68" text-anchor="middle" fill="var(--blue)" font-size="12" font-weight="600">Dense</text>
+      <text x="360" y="85" text-anchor="middle" fill="var(--blue)" font-size="11">16 &rarr; 8</text>
+
+      <line x1="405" y1="75" x2="425" y2="75" stroke="var(--gray)" stroke-width="2" marker-end="url(#arrowRight)"/>
+
+      <!-- Activation 2 -->
+      <rect x="430" y="50" width="60" height="45" rx="20" fill="var(--orange)" opacity="0.2" stroke="var(--orange)" stroke-width="1.5"/>
+      <text x="460" y="78" text-anchor="middle" fill="var(--orange)" font-size="12" font-weight="600">SiLU</text>
+
+      <line x1="495" y1="75" x2="515" y2="75" stroke="var(--gray)" stroke-width="2" marker-end="url(#arrowRight)"/>
+
+      <!-- Dense 3 -->
+      <rect x="520" y="45" width="80" height="55" rx="6" fill="var(--blue)" opacity="0.15" stroke="var(--blue)" stroke-width="1.5"/>
+      <text x="560" y="68" text-anchor="middle" fill="var(--blue)" font-size="12" font-weight="600">Dense</text>
+      <text x="560" y="85" text-anchor="middle" fill="var(--blue)" font-size="11">8 &rarr; 1</text>
+
+      <line x1="605" y1="75" x2="625" y2="75" stroke="var(--gray)" stroke-width="2" marker-end="url(#arrowRight)"/>
+
+      <!-- Output -->
+      <rect x="627" y="55" width="55" height="40" rx="6" fill="var(--green-bg)" stroke="var(--green)" stroke-width="2"/>
+      <text x="654" y="80" text-anchor="middle" fill="var(--green)" font-size="13" font-weight="600">f_j</text>
+
+      <defs><marker id="arrowRight" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="var(--gray)"/></marker></defs>
+
+      <!-- Label -->
+      <text x="350" y="135" text-anchor="middle" fill="var(--gray)" font-size="12">PaperTower: hidden_dims=[16, 8], one tower per feature</text>
+      <text x="350" y="152" text-anchor="middle" fill="var(--gray)" font-size="11">~200 parameters per tower &times; 136 features &asymp; 27K total</text>
+    </svg>
+  </div>
+  <div class="box" style="margin-top:10px;">
+    <strong>Key insight:</strong> Each tower is a 1D function f<sub>j</sub>(x<sub>j</sub>) &mdash; you can plot it as a response curve and interpret it directly.
+  </div>
+</section>
+
+<!-- Slide 5: PaperTower Code -->
+<section>
+  <h2>PaperTower — The Workhorse</h2>
+  <div class="two-col">
+    <div>
+      <pre><code class="language-python">class PaperTower(nn.Module):
+    def __init__(self, in_dim=1,
+                 hidden_dims=[16, 8],
+                 activation="silu",
+                 residual=True):
+        # Build MLP layers
+        layers = []
+        prev = in_dim
+        for h in hidden_dims:
+            layers += [nn.Linear(prev, h),
+                       get_activation(activation)]
+            prev = h
+        layers.append(nn.Linear(prev, 1))
+        self.net = nn.Sequential(*layers)
+
+        # Optional skip connection
+        if residual:
+            self.skip = nn.Linear(in_dim, 1)
+
+    def forward(self, x):
+        out = self.net(x)
+        if self.skip:
+            out = out + self.skip(x)
+        return out  # [batch, 1]</code></pre>
+    </div>
+    <div>
+      <h3>Features</h3>
+      <ul>
+        <li><span class="badge badge-blue">SiLU</span> <span class="badge badge-blue">ReLU</span> <span class="badge badge-blue">GELU</span> activation options</li>
+        <li class="fragment"><strong>Residual skip</strong> connection: ensures the tower can learn a linear function easily</li>
+        <li class="fragment"><strong>BatchNorm</strong> on input (optional) for feature standardization</li>
+        <li class="fragment"><strong>Dropout</strong> on hidden layers</li>
+        <li class="fragment"><strong>in_dim=1</strong> for main effects, <strong>in_dim=2</strong> for GA2M interactions</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- Slide 6: LearnableMonotoneTransform -->
+<section>
+  <h2>LearnableMonotoneTransform</h2>
+  <p>Monotone piecewise-linear feature normalization, initialized from data percentiles.</p>
+  <div class="center">
+    <svg width="700" height="250" viewBox="0 0 700 250">
+      <!-- Left: Raw distribution -->
+      <text x="120" y="20" text-anchor="middle" fill="var(--gray)" font-size="13" font-weight="600">Raw Feature Distribution</text>
+      <!-- Histogram bars (skewed) -->
+      <rect x="30" y="40" width="20" height="150" rx="2" fill="var(--blue)" opacity="0.6"/>
+      <rect x="55" y="60" width="20" height="130" rx="2" fill="var(--blue)" opacity="0.6"/>
+      <rect x="80" y="90" width="20" height="100" rx="2" fill="var(--blue)" opacity="0.6"/>
+      <rect x="105" y="120" width="20" height="70" rx="2" fill="var(--blue)" opacity="0.6"/>
+      <rect x="130" y="145" width="20" height="45" rx="2" fill="var(--blue)" opacity="0.6"/>
+      <rect x="155" y="160" width="20" height="30" rx="2" fill="var(--blue)" opacity="0.6"/>
+      <rect x="180" y="175" width="20" height="15" rx="2" fill="var(--blue)" opacity="0.6"/>
+      <rect x="205" y="183" width="20" height="7" rx="2" fill="var(--blue)" opacity="0.6"/>
+
+      <!-- Arrow -->
+      <line x1="245" y1="120" x2="295" y2="120" stroke="var(--orange)" stroke-width="3" marker-end="url(#arrowOrange)"/>
+      <text x="270" y="110" text-anchor="middle" fill="var(--orange)" font-size="11" font-weight="600">monotone</text>
+      <text x="270" y="140" text-anchor="middle" fill="var(--orange)" font-size="11" font-weight="600">warp</text>
+      <defs><marker id="arrowOrange" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="var(--orange)"/></marker></defs>
+
+      <!-- Middle: Transform curve -->
+      <rect x="305" y="30" width="170" height="170" rx="4" fill="none" stroke="var(--gray-light)" stroke-width="1"/>
+      <text x="390" y="20" text-anchor="middle" fill="var(--gray)" font-size="13" font-weight="600">Learned Transform</text>
+      <!-- PWL monotone curve -->
+      <polyline points="305,200 325,190 345,170 365,140 385,110 405,80 425,55 445,42 465,38 475,36"
+                fill="none" stroke="var(--orange)" stroke-width="3"/>
+      <!-- Knot dots -->
+      <circle cx="305" cy="200" r="3" fill="var(--orange)"/>
+      <circle cx="345" cy="170" r="3" fill="var(--orange)"/>
+      <circle cx="385" cy="110" r="3" fill="var(--orange)"/>
+      <circle cx="425" cy="55" r="3" fill="var(--orange)"/>
+      <circle cx="475" cy="36" r="3" fill="var(--orange)"/>
+      <text x="305" y="215" text-anchor="start" fill="var(--gray)" font-size="10">0</text>
+      <text x="475" y="215" text-anchor="end" fill="var(--gray)" font-size="10">raw</text>
+      <text x="295" y="200" text-anchor="end" fill="var(--gray)" font-size="10">0</text>
+      <text x="295" y="40" text-anchor="end" fill="var(--gray)" font-size="10">1</text>
+
+      <!-- Arrow -->
+      <line x1="490" y1="120" x2="530" y2="120" stroke="var(--orange)" stroke-width="3" marker-end="url(#arrowOrange)"/>
+
+      <!-- Right: Uniform-ish -->
+      <text x="610" y="20" text-anchor="middle" fill="var(--gray)" font-size="13" font-weight="600">Normalized [0, 1]</text>
+      <rect x="530" y="120" width="20" height="70" rx="2" fill="var(--green)" opacity="0.6"/>
+      <rect x="555" y="115" width="20" height="75" rx="2" fill="var(--green)" opacity="0.6"/>
+      <rect x="580" y="110" width="20" height="80" rx="2" fill="var(--green)" opacity="0.6"/>
+      <rect x="605" y="118" width="20" height="72" rx="2" fill="var(--green)" opacity="0.6"/>
+      <rect x="630" y="125" width="20" height="65" rx="2" fill="var(--green)" opacity="0.6"/>
+      <rect x="655" y="112" width="20" height="78" rx="2" fill="var(--green)" opacity="0.6"/>
+    </svg>
+  </div>
+  <div class="eq">
+    y<sub>knots</sub> = cumsum(softplus(raw_deltas)) / total &nbsp;&mdash;&nbsp; guarantees monotonicity via softplus
+  </div>
+</section>
+
+<!-- Slide 7: MonotonePWL -->
+<section>
+  <h2>MonotonePWL Tower</h2>
+  <p>Piecewise-linear with monotonicity constraint: all slopes &ge; 0</p>
+  <div class="two-col">
+    <div class="center">
+      <svg width="300" height="240" viewBox="0 0 300 240">
+        <!-- Axes -->
+        <line x1="40" y1="210" x2="280" y2="210" stroke="var(--gray)" stroke-width="1.5"/>
+        <line x1="40" y1="210" x2="40" y2="20" stroke="var(--gray)" stroke-width="1.5"/>
+        <text x="160" y="235" text-anchor="middle" fill="var(--gray)" font-size="11">feature value</text>
+        <text x="15" y="115" text-anchor="middle" fill="var(--gray)" font-size="11" transform="rotate(-90,15,115)">output</text>
+
+        <!-- PWL curve (monotone increasing) -->
+        <polyline points="50,190 100,170 140,130 180,90 220,70 260,50"
+                  fill="none" stroke="var(--blue)" stroke-width="3"/>
+
+        <!-- Knot dots -->
+        <circle cx="50" cy="190" r="4" fill="var(--blue)"/>
+        <circle cx="100" cy="170" r="4" fill="var(--blue)"/>
+        <circle cx="140" cy="130" r="4" fill="var(--blue)"/>
+        <circle cx="180" cy="90" r="4" fill="var(--blue)"/>
+        <circle cx="220" cy="70" r="4" fill="var(--blue)"/>
+        <circle cx="260" cy="50" r="4" fill="var(--blue)"/>
+
+        <!-- Slope annotations -->
+        <text x="70" y="195" text-anchor="middle" fill="var(--green)" font-size="10">s0=0.4</text>
+        <text x="118" y="160" text-anchor="middle" fill="var(--green)" font-size="10">s1=1.0</text>
+        <text x="158" y="118" text-anchor="middle" fill="var(--green)" font-size="10">s2=1.0</text>
+        <text x="198" y="88" text-anchor="middle" fill="var(--green)" font-size="10">s3=0.5</text>
+        <text x="240" y="70" text-anchor="middle" fill="var(--green)" font-size="10">s4=0.5</text>
+      </svg>
+    </div>
+    <div>
+      <div class="eq">
+        slope<sub>i</sub> = softplus(raw<sub>i</sub>) &ge; 0
+      </div>
+      <ul>
+        <li>Each segment has <strong>independent</strong> slope</li>
+        <li>Only constraint: slope &ge; 0 (monotone non-decreasing)</li>
+        <li>No concavity constraint &mdash; slopes can increase or decrease freely</li>
+        <li class="fragment"><strong>Use for:</strong> pointwise objectives where higher feature value always means higher score (e.g., revenue, freshness)</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- Slide 8: ConcavePWL -->
+<section>
+  <h2>ConcavePWL Tower</h2>
+  <p>Monotone <strong>and</strong> concave: slopes are non-increasing &mdash; diminishing returns</p>
+  <div class="two-col">
+    <div class="center">
+      <svg width="300" height="240" viewBox="0 0 300 240">
+        <!-- Axes -->
+        <line x1="40" y1="210" x2="280" y2="210" stroke="var(--gray)" stroke-width="1.5"/>
+        <line x1="40" y1="210" x2="40" y2="20" stroke="var(--gray)" stroke-width="1.5"/>
+        <text x="160" y="235" text-anchor="middle" fill="var(--gray)" font-size="11">diversity feature</text>
+        <text x="15" y="115" text-anchor="middle" fill="var(--gray)" font-size="11" transform="rotate(-90,15,115)">score</text>
+
+        <!-- Concave PWL curve -->
+        <polyline points="50,190 100,110 150,65 200,42 250,30 270,27"
+                  fill="none" stroke="var(--green)" stroke-width="3"/>
+
+        <!-- Knot dots -->
+        <circle cx="50" cy="190" r="4" fill="var(--green)"/>
+        <circle cx="100" cy="110" r="4" fill="var(--green)"/>
+        <circle cx="150" cy="65" r="4" fill="var(--green)"/>
+        <circle cx="200" cy="42" r="4" fill="var(--green)"/>
+        <circle cx="250" cy="30" r="4" fill="var(--green)"/>
+
+        <!-- Slope annotations (decreasing) -->
+        <text x="70" y="165" text-anchor="middle" fill="var(--red)" font-size="10" font-weight="600">s0=1.6</text>
+        <text x="122" y="98" text-anchor="middle" fill="var(--red)" font-size="10" font-weight="600">s1=0.9</text>
+        <text x="175" y="60" text-anchor="middle" fill="var(--red)" font-size="10" font-weight="600">s2=0.46</text>
+        <text x="225" y="42" text-anchor="middle" fill="var(--red)" font-size="10" font-weight="600">s3=0.24</text>
+
+        <!-- Diminishing returns annotation -->
+        <text x="160" y="210" text-anchor="middle" fill="var(--red)" font-size="10">s0 &ge; s1 &ge; s2 &ge; s3 &ge; 0</text>
+      </svg>
+    </div>
+    <div>
+      <div class="eq-green">
+        slope<sub>K</sub> = softplus(raw<sub>K</sub>)<br>
+        slope<sub>i</sub> = slope<sub>i+1</sub> + softplus(raw<sub>i</sub>)<br>
+        &rArr; slope<sub>0</sub> &ge; slope<sub>1</sub> &ge; &hellip; &ge; slope<sub>K</sub> &ge; 0
+      </div>
+      <div class="box-green fragment">
+        <strong>Why concave matters:</strong><br>
+        Concave + modular = <strong>submodular</strong> function<br>
+        &rArr; Greedy selection gives <strong>(1 - 1/e) &asymp; 63%</strong> of optimal<br>
+        <span class="small">(Nemhauser et al. guarantee)</span>
+      </div>
+    </div>
+  </div>
+</section>
+<!-- ==================== SECTION 3: GAM & GA2M ==================== -->
+
+<!-- Slide 9: GAM_Paper Architecture -->
+<section>
+  <h2>GAM_Paper — Additive Model</h2>
+  <div class="eq">score(x) = &sum;<sub>j=1..D</sub> f<sub>j</sub>(x<sub>j</sub>) + bias</div>
+  <div class="center">
+    <svg width="700" height="260" viewBox="0 0 700 260">
+      <!-- Input features -->
+      <rect x="10" y="20" width="60" height="30" rx="4" fill="var(--blue-bg)" stroke="var(--blue)" stroke-width="1.5"/>
+      <text x="40" y="40" text-anchor="middle" fill="var(--blue)" font-size="12" font-weight="600">x_1</text>
+      <rect x="10" y="65" width="60" height="30" rx="4" fill="var(--blue-bg)" stroke="var(--blue)" stroke-width="1.5"/>
+      <text x="40" y="85" text-anchor="middle" fill="var(--blue)" font-size="12" font-weight="600">x_2</text>
+      <rect x="10" y="110" width="60" height="30" rx="4" fill="var(--blue-bg)" stroke="var(--blue)" stroke-width="1.5"/>
+      <text x="40" y="130" text-anchor="middle" fill="var(--blue)" font-size="12" font-weight="600">x_3</text>
+      <text x="40" y="168" text-anchor="middle" fill="var(--gray)" font-size="18">&vellip;</text>
+      <rect x="10" y="180" width="60" height="30" rx="4" fill="var(--blue-bg)" stroke="var(--blue)" stroke-width="1.5"/>
+      <text x="40" y="200" text-anchor="middle" fill="var(--blue)" font-size="11" font-weight="600">x_136</text>
+
+      <!-- Arrows to towers -->
+      <line x1="75" y1="35" x2="130" y2="35" stroke="var(--gray)" stroke-width="1.5" marker-end="url(#arrowRight)"/>
+      <line x1="75" y1="80" x2="130" y2="80" stroke="var(--gray)" stroke-width="1.5" marker-end="url(#arrowRight)"/>
+      <line x1="75" y1="125" x2="130" y2="125" stroke="var(--gray)" stroke-width="1.5" marker-end="url(#arrowRight)"/>
+      <line x1="75" y1="195" x2="130" y2="195" stroke="var(--gray)" stroke-width="1.5" marker-end="url(#arrowRight)"/>
+
+      <!-- Towers -->
+      <rect x="135" y="15" width="130" height="40" rx="6" fill="var(--blue)" opacity="0.15" stroke="var(--blue)" stroke-width="1.5"/>
+      <text x="200" y="40" text-anchor="middle" fill="var(--blue)" font-size="12" font-weight="600">Tower 1 (MLP)</text>
+
+      <rect x="135" y="60" width="130" height="40" rx="6" fill="var(--blue)" opacity="0.15" stroke="var(--blue)" stroke-width="1.5"/>
+      <text x="200" y="85" text-anchor="middle" fill="var(--blue)" font-size="12" font-weight="600">Tower 2 (MLP)</text>
+
+      <rect x="135" y="105" width="130" height="40" rx="6" fill="var(--blue)" opacity="0.15" stroke="var(--blue)" stroke-width="1.5"/>
+      <text x="200" y="130" text-anchor="middle" fill="var(--blue)" font-size="12" font-weight="600">Tower 3 (MLP)</text>
+
+      <rect x="135" y="175" width="130" height="40" rx="6" fill="var(--blue)" opacity="0.15" stroke="var(--blue)" stroke-width="1.5"/>
+      <text x="200" y="200" text-anchor="middle" fill="var(--blue)" font-size="11" font-weight="600">Tower 136 (MLP)</text>
+
+      <text x="200" y="168" text-anchor="middle" fill="var(--gray)" font-size="18">&vellip;</text>
+
+      <!-- Arrows to outputs -->
+      <line x1="270" y1="35" x2="340" y2="35" stroke="var(--gray)" stroke-width="1.5" marker-end="url(#arrowRight)"/>
+      <line x1="270" y1="80" x2="340" y2="80" stroke="var(--gray)" stroke-width="1.5" marker-end="url(#arrowRight)"/>
+      <line x1="270" y1="125" x2="340" y2="125" stroke="var(--gray)" stroke-width="1.5" marker-end="url(#arrowRight)"/>
+      <line x1="270" y1="195" x2="340" y2="195" stroke="var(--gray)" stroke-width="1.5" marker-end="url(#arrowRight)"/>
+
+      <!-- Tower outputs -->
+      <rect x="345" y="20" width="55" height="28" rx="4" fill="var(--green-bg)" stroke="var(--green)" stroke-width="1.5"/>
+      <text x="372" y="39" text-anchor="middle" fill="var(--green)" font-size="11">f_1</text>
+      <rect x="345" y="65" width="55" height="28" rx="4" fill="var(--green-bg)" stroke="var(--green)" stroke-width="1.5"/>
+      <text x="372" y="84" text-anchor="middle" fill="var(--green)" font-size="11">f_2</text>
+      <rect x="345" y="110" width="55" height="28" rx="4" fill="var(--green-bg)" stroke="var(--green)" stroke-width="1.5"/>
+      <text x="372" y="129" text-anchor="middle" fill="var(--green)" font-size="11">f_3</text>
+      <rect x="345" y="182" width="55" height="28" rx="4" fill="var(--green-bg)" stroke="var(--green)" stroke-width="1.5"/>
+      <text x="372" y="200" text-anchor="middle" fill="var(--green)" font-size="11">f_136</text>
+
+      <!-- Sum node -->
+      <line x1="405" y1="34" x2="470" y2="115" stroke="var(--gray)" stroke-width="1" stroke-dasharray="4"/>
+      <line x1="405" y1="79" x2="470" y2="115" stroke="var(--gray)" stroke-width="1" stroke-dasharray="4"/>
+      <line x1="405" y1="124" x2="470" y2="115" stroke="var(--gray)" stroke-width="1" stroke-dasharray="4"/>
+      <line x1="405" y1="196" x2="470" y2="115" stroke="var(--gray)" stroke-width="1" stroke-dasharray="4"/>
+
+      <circle cx="480" cy="115" r="25" fill="var(--green)" opacity="0.2" stroke="var(--green)" stroke-width="2"/>
+      <text x="480" y="122" text-anchor="middle" fill="var(--green)" font-size="22" font-weight="700">&sum;</text>
+
+      <!-- Output -->
+      <line x1="508" y1="115" x2="560" y2="115" stroke="var(--gray)" stroke-width="2" marker-end="url(#arrowRight)"/>
+
+      <!-- Bias -->
+      <rect x="490" y="150" width="50" height="25" rx="4" fill="var(--gray-light)"/>
+      <text x="515" y="167" text-anchor="middle" fill="var(--gray)" font-size="11">+ bias</text>
+      <line x1="515" y1="150" x2="515" y2="138" stroke="var(--gray)" stroke-width="1" stroke-dasharray="3"/>
+
+      <rect x="565" y="98" width="100" height="35" rx="6" fill="var(--green)" opacity="0.85"/>
+      <text x="615" y="120" text-anchor="middle" fill="white" font-size="14" font-weight="600">score [B, L]</text>
+    </svg>
+  </div>
+  <p class="small" style="text-align:center; color:var(--gray);">136 independent towers &mdash; each one is interpretable as a response curve</p>
+</section>
+
+<!-- Slide 10: Forward Pass Flow -->
+<section>
+  <h2>Forward Pass — Shape Flow</h2>
+  <div class="center">
+    <svg width="700" height="200" viewBox="0 0 700 200">
+      <!-- Step 1 -->
+      <rect x="10" y="60" width="110" height="55" rx="6" fill="var(--blue-bg)" stroke="var(--blue)" stroke-width="2"/>
+      <text x="65" y="82" text-anchor="middle" fill="var(--blue)" font-size="12" font-weight="600">Input</text>
+      <text x="65" y="102" text-anchor="middle" fill="var(--blue)" font-size="11">[B, L, D]</text>
+      <text x="65" y="132" text-anchor="middle" fill="var(--gray)" font-size="10">[2, 40, 136]</text>
+
+      <line x1="125" y1="87" x2="155" y2="87" stroke="var(--gray)" stroke-width="2" marker-end="url(#arrowRight)"/>
+
+      <!-- Step 2 -->
+      <rect x="160" y="60" width="100" height="55" rx="6" fill="var(--orange-bg)" stroke="var(--orange)" stroke-width="2"/>
+      <text x="210" y="82" text-anchor="middle" fill="var(--orange)" font-size="12" font-weight="600">Flatten</text>
+      <text x="210" y="102" text-anchor="middle" fill="var(--orange)" font-size="11">[B*L, D]</text>
+      <text x="210" y="132" text-anchor="middle" fill="var(--gray)" font-size="10">[80, 136]</text>
+
+      <line x1="265" y1="87" x2="295" y2="87" stroke="var(--gray)" stroke-width="2" marker-end="url(#arrowRight)"/>
+
+      <!-- Step 3 -->
+      <rect x="300" y="50" width="120" height="70" rx="6" fill="var(--blue)" opacity="0.12" stroke="var(--blue)" stroke-width="2"/>
+      <text x="360" y="73" text-anchor="middle" fill="var(--blue)" font-size="12" font-weight="600">Per-tower</text>
+      <text x="360" y="92" text-anchor="middle" fill="var(--blue)" font-size="11">[B*L, 1] &times; D</text>
+      <text x="360" y="108" text-anchor="middle" fill="var(--blue)" font-size="10">&rarr; [B*L, D]</text>
+      <text x="360" y="138" text-anchor="middle" fill="var(--gray)" font-size="10">[80, 136]</text>
+
+      <line x1="425" y1="87" x2="455" y2="87" stroke="var(--gray)" stroke-width="2" marker-end="url(#arrowRight)"/>
+
+      <!-- Step 4 -->
+      <rect x="460" y="60" width="85" height="55" rx="6" fill="var(--green-bg)" stroke="var(--green)" stroke-width="2"/>
+      <text x="502" y="82" text-anchor="middle" fill="var(--green)" font-size="12" font-weight="600">Sum</text>
+      <text x="502" y="102" text-anchor="middle" fill="var(--green)" font-size="11">[B*L]</text>
+      <text x="502" y="132" text-anchor="middle" fill="var(--gray)" font-size="10">[80]</text>
+
+      <line x1="550" y1="87" x2="580" y2="87" stroke="var(--gray)" stroke-width="2" marker-end="url(#arrowRight)"/>
+
+      <!-- Step 5 -->
+      <rect x="585" y="60" width="100" height="55" rx="6" fill="var(--green)" opacity="0.85"/>
+      <text x="635" y="82" text-anchor="middle" fill="white" font-size="12" font-weight="600">Reshape</text>
+      <text x="635" y="102" text-anchor="middle" fill="white" font-size="11">[B, L]</text>
+      <text x="635" y="132" text-anchor="middle" fill="var(--gray)" font-size="10">[2, 40]</text>
+
+      <!-- Title annotations -->
+      <text x="65" y="45" text-anchor="middle" fill="var(--gray)" font-size="10" font-weight="600">1</text>
+      <text x="210" y="45" text-anchor="middle" fill="var(--gray)" font-size="10" font-weight="600">2</text>
+      <text x="360" y="38" text-anchor="middle" fill="var(--gray)" font-size="10" font-weight="600">3</text>
+      <text x="502" y="45" text-anchor="middle" fill="var(--gray)" font-size="10" font-weight="600">4</text>
+      <text x="635" y="45" text-anchor="middle" fill="var(--gray)" font-size="10" font-weight="600">5</text>
+    </svg>
+  </div>
+  <div class="box" style="margin-top: 15px;">
+    <strong>Optional enhancements at step 3:</strong>
+    <ul class="small">
+      <li><strong>Feature transforms:</strong> LearnableMonotoneTransform applied before tower</li>
+      <li><strong>Tower dropout:</strong> randomly zeros entire tower outputs (scale-corrected)</li>
+      <li><strong>Output normalization:</strong> BatchNorm centering prevents one tower dominating</li>
+    </ul>
+  </div>
+</section>
+
+<!-- Slide 11: Response Curves -->
+<section>
+  <h2>Response Curves — What Interpretability Looks Like</h2>
+  <p>Each tower is a 1D function &mdash; plot <code>get_main_effect(feature_idx, x_values)</code></p>
+  <div class="center">
+    <svg width="700" height="240" viewBox="0 0 700 240">
+      <!-- Plot 1: BM25 Body -->
+      <rect x="10" y="10" width="160" height="150" rx="4" fill="#fafafa" stroke="var(--gray-light)" stroke-width="1"/>
+      <text x="90" y="28" text-anchor="middle" fill="var(--gray)" font-size="10" font-weight="600">BM25 (Body)</text>
+      <polyline points="25,140 45,135 65,120 85,90 105,60 125,45 145,38 155,36"
+                fill="none" stroke="var(--blue)" stroke-width="2.5"/>
+      <text x="90" y="175" text-anchor="middle" fill="var(--gray)" font-size="9">Monotone increasing &mdash;<br/>higher BM25 = more relevant</text>
+
+      <!-- Plot 2: Doc Length -->
+      <rect x="185" y="10" width="160" height="150" rx="4" fill="#fafafa" stroke="var(--gray-light)" stroke-width="1"/>
+      <text x="265" y="28" text-anchor="middle" fill="var(--gray)" font-size="10" font-weight="600">Document Length</text>
+      <polyline points="200,130 220,100 240,55 260,40 280,50 300,80 320,120 330,135"
+                fill="none" stroke="var(--orange)" stroke-width="2.5"/>
+      <text x="265" y="175" text-anchor="middle" fill="var(--gray)" font-size="9">Non-monotone &mdash; medium<br/>length docs preferred</text>
+
+      <!-- Plot 3: PageRank -->
+      <rect x="360" y="10" width="160" height="150" rx="4" fill="#fafafa" stroke="var(--gray-light)" stroke-width="1"/>
+      <text x="440" y="28" text-anchor="middle" fill="var(--gray)" font-size="10" font-weight="600">PageRank</text>
+      <polyline points="375,145 395,140 415,120 435,80 455,50 475,35 495,30 505,28"
+                fill="none" stroke="var(--green)" stroke-width="2.5"/>
+      <text x="440" y="175" text-anchor="middle" fill="var(--gray)" font-size="9">Strong positive &mdash;<br/>authority signal</text>
+
+      <!-- Plot 4: URL Depth -->
+      <rect x="535" y="10" width="160" height="150" rx="4" fill="#fafafa" stroke="var(--gray-light)" stroke-width="1"/>
+      <text x="615" y="28" text-anchor="middle" fill="var(--gray)" font-size="10" font-weight="600">URL Depth</text>
+      <polyline points="550,50 570,55 590,70 610,100 630,130 650,140 670,142 680,143"
+                fill="none" stroke="var(--red)" stroke-width="2.5"/>
+      <text x="615" y="175" text-anchor="middle" fill="var(--gray)" font-size="9">Decreasing &mdash; deeper<br/>URLs less relevant</text>
+
+      <!-- Bottom annotation -->
+      <text x="350" y="215" text-anchor="middle" fill="var(--blue)" font-size="12" font-weight="600">
+        Every learned tower shape tells a story about the feature's impact on ranking
+      </text>
+    </svg>
+  </div>
+</section>
+
+<!-- Slide 12: GA2M -->
+<section>
+  <h2>GA2M — Adding Pairwise Interactions</h2>
+  <div class="eq">score(x) = &sum;<sub>j</sub> f<sub>j</sub>(x<sub>j</sub>) + &sum;<sub>(j,k)</sub> f<sub>jk</sub>(x<sub>j</sub>, x<sub>k</sub>) + bias</div>
+  <div class="center">
+    <svg width="650" height="230" viewBox="0 0 650 230">
+      <!-- Main effect towers (left group) -->
+      <rect x="10" y="10" width="200" height="90" rx="6" fill="var(--blue-bg)" stroke="var(--blue)" stroke-width="2"/>
+      <text x="110" y="35" text-anchor="middle" fill="var(--blue)" font-size="13" font-weight="600">Main Effect Towers</text>
+      <text x="110" y="55" text-anchor="middle" fill="var(--blue)" font-size="11">D towers, input_dim=1</text>
+      <text x="110" y="75" text-anchor="middle" fill="var(--gray)" font-size="10">f_1(x_1), f_2(x_2), ..., f_D(x_D)</text>
+
+      <!-- Interaction towers (right group) -->
+      <rect x="10" y="115" width="200" height="100" rx="6" fill="var(--orange-bg)" stroke="var(--orange)" stroke-width="2"/>
+      <text x="110" y="140" text-anchor="middle" fill="var(--orange)" font-size="13" font-weight="600">Interaction Towers</text>
+      <text x="110" y="162" text-anchor="middle" fill="var(--orange)" font-size="11">Top-K pairs, input_dim=2</text>
+      <text x="110" y="182" text-anchor="middle" fill="var(--gray)" font-size="10">f_12(x_1, x_2), f_35(x_3, x_5), ...</text>
+      <text x="110" y="200" text-anchor="middle" fill="var(--gray)" font-size="9">Typically K=50 pairs</text>
+
+      <!-- Arrows to sum -->
+      <line x1="215" y1="55" x2="320" y2="115" stroke="var(--blue)" stroke-width="2" marker-end="url(#arrowRight)"/>
+      <line x1="215" y1="165" x2="320" y2="130" stroke="var(--orange)" stroke-width="2" marker-end="url(#arrowRight)"/>
+
+      <!-- Sum -->
+      <circle cx="340" cy="120" r="25" fill="var(--green)" opacity="0.2" stroke="var(--green)" stroke-width="2"/>
+      <text x="340" y="127" text-anchor="middle" fill="var(--green)" font-size="22" font-weight="700">&sum;</text>
+
+      <line x1="368" y1="120" x2="420" y2="120" stroke="var(--gray)" stroke-width="2" marker-end="url(#arrowRight)"/>
+
+      <rect x="425" y="103" width="90" height="35" rx="6" fill="var(--green)" opacity="0.85"/>
+      <text x="470" y="125" text-anchor="middle" fill="white" font-size="13" font-weight="600">score</text>
+
+      <!-- Interaction tower detail -->
+      <rect x="540" y="30" width="100" height="180" rx="6" fill="#fafafa" stroke="var(--gray-light)" stroke-width="1"/>
+      <text x="590" y="50" text-anchor="middle" fill="var(--orange)" font-size="10" font-weight="600">Interaction Tower</text>
+      <!-- 2D input -->
+      <rect x="555" y="60" width="30" height="20" rx="3" fill="var(--blue-bg)" stroke="var(--blue)" stroke-width="1"/>
+      <text x="570" y="74" text-anchor="middle" fill="var(--blue)" font-size="8">x_j</text>
+      <rect x="595" y="60" width="30" height="20" rx="3" fill="var(--blue-bg)" stroke="var(--blue)" stroke-width="1"/>
+      <text x="610" y="74" text-anchor="middle" fill="var(--blue)" font-size="8">x_k</text>
+      <!-- Stack -->
+      <line x1="590" y1="82" x2="590" y2="95" stroke="var(--gray)" stroke-width="1"/>
+      <rect x="555" y="98" width="70" height="22" rx="3" fill="var(--orange)" opacity="0.15" stroke="var(--orange)" stroke-width="1"/>
+      <text x="590" y="113" text-anchor="middle" fill="var(--orange)" font-size="9">[2] &rarr; [16]</text>
+      <rect x="555" y="125" width="70" height="22" rx="3" fill="var(--orange)" opacity="0.15" stroke="var(--orange)" stroke-width="1"/>
+      <text x="590" y="140" text-anchor="middle" fill="var(--orange)" font-size="9">[16] &rarr; [8]</text>
+      <rect x="555" y="152" width="70" height="22" rx="3" fill="var(--orange)" opacity="0.15" stroke="var(--orange)" stroke-width="1"/>
+      <text x="590" y="167" text-anchor="middle" fill="var(--orange)" font-size="9">[8] &rarr; [1]</text>
+      <rect x="565" y="182" width="50" height="18" rx="3" fill="var(--green-bg)" stroke="var(--green)" stroke-width="1"/>
+      <text x="590" y="195" text-anchor="middle" fill="var(--green)" font-size="9">f_jk</text>
+    </svg>
+  </div>
+</section>
+
+<!-- Slide 13: Interaction Selection -->
+<section>
+  <h2>Interaction Selection</h2>
+  <p>How to pick which feature pairs get interaction towers? <strong>Correlation-based selection.</strong></p>
+  <div class="two-col">
+    <div class="center">
+      <svg width="280" height="250" viewBox="0 0 280 250">
+        <!-- Heatmap grid -->
+        <text x="140" y="18" text-anchor="middle" fill="var(--gray)" font-size="11" font-weight="600">|corr(x_j &middot; x_k, y)|</text>
+        <!-- Grid cells with varying opacity -->
+        <rect x="40" y="25" width="35" height="35" fill="var(--orange)" opacity="0.1"/>
+        <rect x="75" y="25" width="35" height="35" fill="var(--orange)" opacity="0.7"/>
+        <rect x="110" y="25" width="35" height="35" fill="var(--orange)" opacity="0.2"/>
+        <rect x="145" y="25" width="35" height="35" fill="var(--orange)" opacity="0.4"/>
+        <rect x="180" y="25" width="35" height="35" fill="var(--orange)" opacity="0.1"/>
+        <rect x="215" y="25" width="35" height="35" fill="var(--orange)" opacity="0.3"/>
+
+        <rect x="40" y="60" width="35" height="35" fill="var(--orange)" opacity="0.7"/>
+        <rect x="75" y="60" width="35" height="35" fill="var(--orange)" opacity="0.1"/>
+        <rect x="110" y="60" width="35" height="35" fill="var(--orange)" opacity="0.9"/>
+        <rect x="145" y="60" width="35" height="35" fill="var(--orange)" opacity="0.3"/>
+        <rect x="180" y="60" width="35" height="35" fill="var(--orange)" opacity="0.5"/>
+        <rect x="215" y="60" width="35" height="35" fill="var(--orange)" opacity="0.2"/>
+
+        <rect x="40" y="95" width="35" height="35" fill="var(--orange)" opacity="0.2"/>
+        <rect x="75" y="95" width="35" height="35" fill="var(--orange)" opacity="0.9"/>
+        <rect x="110" y="95" width="35" height="35" fill="var(--orange)" opacity="0.1"/>
+        <rect x="145" y="95" width="35" height="35" fill="var(--orange)" opacity="0.8"/>
+        <rect x="180" y="95" width="35" height="35" fill="var(--orange)" opacity="0.1"/>
+        <rect x="215" y="95" width="35" height="35" fill="var(--orange)" opacity="0.6"/>
+
+        <rect x="40" y="130" width="35" height="35" fill="var(--orange)" opacity="0.4"/>
+        <rect x="75" y="130" width="35" height="35" fill="var(--orange)" opacity="0.3"/>
+        <rect x="110" y="130" width="35" height="35" fill="var(--orange)" opacity="0.8"/>
+        <rect x="145" y="130" width="35" height="35" fill="var(--orange)" opacity="0.1"/>
+        <rect x="180" y="130" width="35" height="35" fill="var(--orange)" opacity="0.3"/>
+        <rect x="215" y="130" width="35" height="35" fill="var(--orange)" opacity="0.4"/>
+
+        <!-- Highlight top pairs -->
+        <rect x="110" y="60" width="35" height="35" fill="none" stroke="var(--red)" stroke-width="3"/>
+        <rect x="75" y="95" width="35" height="35" fill="none" stroke="var(--red)" stroke-width="3"/>
+        <rect x="145" y="95" width="35" height="35" fill="none" stroke="var(--red)" stroke-width="3"/>
+
+        <!-- Feature labels -->
+        <text x="57" y="195" text-anchor="middle" fill="var(--gray)" font-size="9">BM25</text>
+        <text x="92" y="195" text-anchor="middle" fill="var(--gray)" font-size="9">TF</text>
+        <text x="127" y="195" text-anchor="middle" fill="var(--gray)" font-size="9">IDF</text>
+        <text x="162" y="195" text-anchor="middle" fill="var(--gray)" font-size="9">DL</text>
+        <text x="197" y="195" text-anchor="middle" fill="var(--gray)" font-size="9">PR</text>
+        <text x="232" y="195" text-anchor="middle" fill="var(--gray)" font-size="9">URL</text>
+
+        <text x="140" y="230" text-anchor="middle" fill="var(--red)" font-size="10" font-weight="600">Select top-K highest |correlation|</text>
+      </svg>
+    </div>
+    <div>
+      <pre><code class="language-python">pairs = select_interactions_correlation(
+    X, y, top_k=50
+)
+# Returns: [(3, 7), (1, 12), ...]
+
+model = GA2M_Paper(
+    num_features=136,
+    interaction_pairs=pairs,
+    hidden_dims=[16, 8]
+)</code></pre>
+      <div class="box" style="margin-top:10px;">
+        <strong>Algorithm:</strong>
+        <ol class="small">
+          <li>For each pair (j, k): compute interaction = x_j &times; x_k</li>
+          <li>Measure |pearson_corr(interaction, y)|</li>
+          <li>Sort by correlation, select top-K pairs</li>
+        </ol>
+        <p class="small">Complexity: O(D&sup2;) where D = number of features</p>
+      </div>
+    </div>
+  </div>
+</section>
+<!-- ==================== SECTION 4: CONTEXT-WEIGHTED MODELS ==================== -->
+
+<!-- Slide 14: ContextGAM -->
+<section>
+  <h2>ContextGAM — Query-Adaptive Weighting</h2>
+  <div class="eq-orange">score(x) = &sum;<sub>j</sub> w<sub>j</sub>(x) &middot; f<sub>j</sub>(x<sub>j</sub>) + bias &nbsp;&mdash;&nbsp; where w = softmax(context_net(x))</div>
+  <div class="center">
+    <svg width="700" height="280" viewBox="0 0 700 280">
+      <!-- Input -->
+      <rect x="10" y="80" width="80" height="100" rx="6" fill="var(--blue-bg)" stroke="var(--blue)" stroke-width="2"/>
+      <text x="50" y="110" text-anchor="middle" fill="var(--blue)" font-size="12" font-weight="600">Features</text>
+      <text x="50" y="130" text-anchor="middle" fill="var(--blue)" font-size="10">x_1 ... x_D</text>
+      <text x="50" y="150" text-anchor="middle" fill="var(--gray)" font-size="9">[B*L, 136]</text>
+
+      <!-- Branch 1: Towers (top) -->
+      <line x1="95" y1="110" x2="145" y2="60" stroke="var(--blue)" stroke-width="2" marker-end="url(#arrowRight)"/>
+      <rect x="150" y="30" width="160" height="60" rx="6" fill="var(--blue)" opacity="0.12" stroke="var(--blue)" stroke-width="2"/>
+      <text x="230" y="55" text-anchor="middle" fill="var(--blue)" font-size="12" font-weight="600">D Towers (1D each)</text>
+      <text x="230" y="75" text-anchor="middle" fill="var(--blue)" font-size="10">f_1(x_1), ..., f_D(x_D)</text>
+
+      <!-- Branch 2: Context net (bottom) -->
+      <line x1="95" y1="150" x2="145" y2="190" stroke="var(--orange)" stroke-width="2" marker-end="url(#arrowRight)"/>
+      <rect x="150" y="160" width="160" height="70" rx="6" fill="var(--orange-bg)" stroke="var(--orange)" stroke-width="2"/>
+      <text x="230" y="185" text-anchor="middle" fill="var(--orange)" font-size="12" font-weight="600">Context Network</text>
+      <text x="230" y="205" text-anchor="middle" fill="var(--orange)" font-size="10">[136] &rarr; [64] &rarr; [32] &rarr; [136]</text>
+      <text x="230" y="222" text-anchor="middle" fill="var(--orange)" font-size="9">+ softmax &rarr; weights w_j</text>
+
+      <!-- Tower outputs -->
+      <line x1="315" y1="60" x2="390" y2="60" stroke="var(--blue)" stroke-width="2"/>
+      <text x="355" y="50" text-anchor="middle" fill="var(--blue)" font-size="10">[B*L, D]</text>
+
+      <!-- Context outputs -->
+      <line x1="315" y1="195" x2="390" y2="195" stroke="var(--orange)" stroke-width="2"/>
+      <text x="355" y="185" text-anchor="middle" fill="var(--orange)" font-size="10">[B*L, D]</text>
+
+      <!-- Multiply node -->
+      <circle cx="410" cy="127" r="28" fill="var(--purple)" opacity="0.15" stroke="var(--purple)" stroke-width="2"/>
+      <text x="410" y="134" text-anchor="middle" fill="var(--purple)" font-size="22" font-weight="700">&times;</text>
+      <line x1="400" y1="60" x2="400" y2="100" stroke="var(--blue)" stroke-width="1.5"/>
+      <line x1="400" y1="195" x2="400" y2="155" stroke="var(--orange)" stroke-width="1.5"/>
+
+      <!-- Scale + Sum -->
+      <line x1="440" y1="127" x2="490" y2="127" stroke="var(--gray)" stroke-width="2" marker-end="url(#arrowRight)"/>
+      <circle cx="510" cy="127" r="22" fill="var(--green)" opacity="0.2" stroke="var(--green)" stroke-width="2"/>
+      <text x="510" y="134" text-anchor="middle" fill="var(--green)" font-size="18" font-weight="700">&sum;</text>
+
+      <!-- Scale note -->
+      <text x="475" y="115" text-anchor="middle" fill="var(--gray)" font-size="9">&times; D</text>
+
+      <!-- Output -->
+      <line x1="535" y1="127" x2="580" y2="127" stroke="var(--gray)" stroke-width="2" marker-end="url(#arrowRight)"/>
+      <rect x="585" y="110" width="90" height="35" rx="6" fill="var(--green)" opacity="0.85"/>
+      <text x="630" y="132" text-anchor="middle" fill="white" font-size="13" font-weight="600">score</text>
+
+      <!-- Annotation -->
+      <text x="500" y="250" text-anchor="middle" fill="var(--gray)" font-size="11">Towers remain 1D (distillable to PWL) &mdash; context weights adapt per query</text>
+      <text x="500" y="270" text-anchor="middle" fill="var(--orange)" font-size="11" font-weight="600">Context network: ~14K params &mdash; small enough to keep as neural net at serving</text>
+    </svg>
+  </div>
+</section>
+
+<!-- Slide 15: ContextPresentGA2M -->
+<section>
+  <h2>ContextPresentGA2M — External Context</h2>
+  <p>When you have <strong>separate context features</strong> (query text, category, user profile):</p>
+  <div class="center">
+    <svg width="650" height="250" viewBox="0 0 650 250">
+      <!-- Query context features -->
+      <rect x="10" y="15" width="120" height="80" rx="6" fill="var(--orange-bg)" stroke="var(--orange)" stroke-width="2"/>
+      <text x="70" y="38" text-anchor="middle" fill="var(--orange)" font-size="11" font-weight="600">Query Context</text>
+      <text x="70" y="58" text-anchor="middle" fill="var(--orange)" font-size="10">q_1 (category)</text>
+      <text x="70" y="75" text-anchor="middle" fill="var(--orange)" font-size="10">q_2 (intent)</text>
+
+      <!-- Item features -->
+      <rect x="10" y="120" width="120" height="55" rx="6" fill="var(--blue-bg)" stroke="var(--blue)" stroke-width="2"/>
+      <text x="70" y="143" text-anchor="middle" fill="var(--blue)" font-size="11" font-weight="600">Item Features</text>
+      <text x="70" y="163" text-anchor="middle" fill="var(--blue)" font-size="10">x_1, x_2, ..., x_D</text>
+
+      <!-- Context weight networks -->
+      <line x1="135" y1="40" x2="175" y2="40" stroke="var(--orange)" stroke-width="1.5" marker-end="url(#arrowRight)"/>
+      <line x1="135" y1="70" x2="175" y2="70" stroke="var(--orange)" stroke-width="1.5" marker-end="url(#arrowRight)"/>
+      <rect x="180" y="15" width="130" height="30" rx="4" fill="var(--orange)" opacity="0.15" stroke="var(--orange)" stroke-width="1.5"/>
+      <text x="245" y="35" text-anchor="middle" fill="var(--orange)" font-size="10">ContextWeightNet 1</text>
+      <rect x="180" y="52" width="130" height="30" rx="4" fill="var(--orange)" opacity="0.15" stroke="var(--orange)" stroke-width="1.5"/>
+      <text x="245" y="72" text-anchor="middle" fill="var(--orange)" font-size="10">ContextWeightNet 2</text>
+
+      <!-- Alpha outputs -->
+      <line x1="315" y1="30" x2="365" y2="55" stroke="var(--orange)" stroke-width="1.5"/>
+      <line x1="315" y1="67" x2="365" y2="55" stroke="var(--orange)" stroke-width="1.5"/>
+
+      <!-- Softmax + sum -->
+      <rect x="370" y="35" width="75" height="40" rx="4" fill="var(--orange-bg)" stroke="var(--orange)" stroke-width="1.5"/>
+      <text x="407" y="52" text-anchor="middle" fill="var(--orange)" font-size="9" font-weight="600">softmax</text>
+      <text x="407" y="67" text-anchor="middle" fill="var(--orange)" font-size="9">&alpha;<sub>1</sub> + &alpha;<sub>2</sub></text>
+
+      <!-- Weights w_j -->
+      <line x1="450" y1="55" x2="495" y2="55" stroke="var(--orange)" stroke-width="1.5"/>
+      <text x="475" y="48" text-anchor="middle" fill="var(--orange)" font-size="9">w_j(q)</text>
+
+      <!-- Item towers -->
+      <line x1="135" y1="147" x2="175" y2="147" stroke="var(--blue)" stroke-width="1.5" marker-end="url(#arrowRight)"/>
+      <rect x="180" y="120" width="130" height="55" rx="6" fill="var(--blue)" opacity="0.12" stroke="var(--blue)" stroke-width="1.5"/>
+      <text x="245" y="143" text-anchor="middle" fill="var(--blue)" font-size="11" font-weight="600">Item Towers</text>
+      <text x="245" y="163" text-anchor="middle" fill="var(--blue)" font-size="10">[64, 32] hidden</text>
+
+      <!-- Tower outputs -->
+      <line x1="315" y1="147" x2="495" y2="147" stroke="var(--blue)" stroke-width="1.5"/>
+      <text x="405" y="140" text-anchor="middle" fill="var(--blue)" font-size="9">f_j(x_j)</text>
+
+      <!-- Multiply + Sum -->
+      <circle cx="510" cy="100" r="22" fill="var(--purple)" opacity="0.15" stroke="var(--purple)" stroke-width="2"/>
+      <text x="510" y="107" text-anchor="middle" fill="var(--purple)" font-size="18" font-weight="700">w&middot;f</text>
+      <line x1="500" y1="55" x2="500" y2="80" stroke="var(--orange)" stroke-width="1.5"/>
+      <line x1="500" y1="147" x2="500" y2="122" stroke="var(--blue)" stroke-width="1.5"/>
+
+      <line x1="535" y1="100" x2="575" y2="100" stroke="var(--gray)" stroke-width="2" marker-end="url(#arrowRight)"/>
+      <rect x="580" y="83" width="60" height="35" rx="6" fill="var(--green)" opacity="0.85"/>
+      <text x="610" y="105" text-anchor="middle" fill="white" font-size="12" font-weight="600">score</text>
+
+      <!-- Equations -->
+      <text x="350" y="210" text-anchor="middle" fill="var(--gray)" font-size="11">Eq 8: &alpha;<sub>k</sub> = softmax(net<sub>k</sub>(q<sub>k</sub>)) &isin; R<sup>D</sup></text>
+      <text x="350" y="230" text-anchor="middle" fill="var(--gray)" font-size="11">Eq 9: w<sub>j</sub>(q) = &sum;<sub>k</sub> &alpha;<sub>k</sub><sup>(j)</sup> &mdash; importance of feature j given query</text>
+    </svg>
+  </div>
+</section>
+
+<!-- Slide 16: Interpretability Preserved -->
+<section>
+  <h2>Interpretability Preserved</h2>
+  <div class="two-col">
+    <div>
+      <h3>What you can inspect</h3>
+      <ul>
+        <li><strong>Tower shapes</strong> &mdash; still 1D functions, distillable to PWL</li>
+        <li class="fragment"><strong>Context weights</strong> &mdash; per-query softmax weights showing which features matter more</li>
+        <li class="fragment"><strong>Per-document attribution</strong> via <code>explain()</code></li>
+      </ul>
+      <pre class="fragment"><code class="language-python"># Explain a single document
+attr = model.explain(x_single)
+
+# Returns:
+#   tower_outputs:   [D] raw tower values
+#   context_weights: [D] softmax weights
+#   contributions:   [D] = w_j * f_j
+#   total_score:     scalar sum</code></pre>
+    </div>
+    <div class="center fragment">
+      <svg width="280" height="250" viewBox="0 0 280 250">
+        <text x="140" y="18" text-anchor="middle" fill="var(--gray)" font-size="11" font-weight="600">Contribution Breakdown</text>
+        <!-- Horizontal bar chart -->
+        <rect x="100" y="30" width="150" height="22" rx="3" fill="var(--blue)" opacity="0.8"/>
+        <text x="95" y="45" text-anchor="end" fill="var(--gray)" font-size="10">BM25</text>
+        <text x="255" y="45" text-anchor="start" fill="var(--blue)" font-size="9">+0.42</text>
+
+        <rect x="100" y="58" width="110" height="22" rx="3" fill="var(--blue)" opacity="0.65"/>
+        <text x="95" y="73" text-anchor="end" fill="var(--gray)" font-size="10">PageRank</text>
+        <text x="215" y="73" text-anchor="start" fill="var(--blue)" font-size="9">+0.31</text>
+
+        <rect x="100" y="86" width="80" height="22" rx="3" fill="var(--blue)" opacity="0.5"/>
+        <text x="95" y="101" text-anchor="end" fill="var(--gray)" font-size="10">TF-IDF</text>
+        <text x="185" y="101" text-anchor="start" fill="var(--blue)" font-size="9">+0.22</text>
+
+        <rect x="100" y="114" width="45" height="22" rx="3" fill="var(--blue)" opacity="0.35"/>
+        <text x="95" y="129" text-anchor="end" fill="var(--gray)" font-size="10">URL len</text>
+        <text x="150" y="129" text-anchor="start" fill="var(--blue)" font-size="9">+0.13</text>
+
+        <rect x="60" y="142" width="40" height="22" rx="3" fill="var(--red)" opacity="0.5"/>
+        <text x="95" y="157" text-anchor="end" fill="var(--gray)" font-size="10">Depth</text>
+        <text x="55" y="157" text-anchor="end" fill="var(--red)" font-size="9">-0.11</text>
+
+        <!-- Total -->
+        <line x1="40" y1="175" x2="270" y2="175" stroke="var(--gray-light)" stroke-width="1"/>
+        <text x="140" y="195" text-anchor="middle" fill="var(--green)" font-size="13" font-weight="600">Total: 0.97</text>
+        <text x="140" y="215" text-anchor="middle" fill="var(--gray)" font-size="10">contribution = w_j &times; f_j(x_j)</text>
+      </svg>
+    </div>
+  </div>
+</section>
+
+<!-- Slide 17: When to Use Which Model -->
+<section>
+  <h2>When to Use Which Model?</h2>
+  <div class="center">
+    <svg width="680" height="320" viewBox="0 0 680 320">
+      <!-- Decision tree -->
+      <!-- Root -->
+      <rect x="240" y="10" width="200" height="40" rx="8" fill="var(--gray)" opacity="0.1" stroke="var(--gray)" stroke-width="2"/>
+      <text x="340" y="35" text-anchor="middle" fill="#1e293b" font-size="12" font-weight="600">Need feature interactions?</text>
+
+      <!-- No interactions branch -->
+      <line x1="280" y1="52" x2="150" y2="85" stroke="var(--gray)" stroke-width="1.5"/>
+      <text x="200" y="65" text-anchor="middle" fill="var(--green)" font-size="10" font-weight="600">No</text>
+      <rect x="55" y="85" width="190" height="40" rx="8" fill="var(--gray)" opacity="0.1" stroke="var(--gray)" stroke-width="2"/>
+      <text x="150" y="110" text-anchor="middle" fill="#1e293b" font-size="12" font-weight="600">Have query context?</text>
+
+      <!-- Yes interactions branch -->
+      <line x1="400" y1="52" x2="530" y2="85" stroke="var(--gray)" stroke-width="1.5"/>
+      <text x="480" y="65" text-anchor="middle" fill="var(--blue)" font-size="10" font-weight="600">Yes</text>
+      <rect x="435" y="85" width="190" height="40" rx="8" fill="var(--gray)" opacity="0.1" stroke="var(--gray)" stroke-width="2"/>
+      <text x="530" y="110" text-anchor="middle" fill="#1e293b" font-size="12" font-weight="600">Have query context?</text>
+
+      <!-- No context, no interaction -->
+      <line x1="100" y1="127" x2="70" y2="160" stroke="var(--gray)" stroke-width="1.5"/>
+      <text x="72" y="147" text-anchor="middle" fill="var(--green)" font-size="10">No</text>
+      <rect x="10" y="160" width="120" height="45" rx="8" fill="var(--blue)" opacity="0.85"/>
+      <text x="70" y="180" text-anchor="middle" fill="white" font-size="12" font-weight="700">GAM_Paper</text>
+      <text x="70" y="197" text-anchor="middle" fill="white" font-size="9">Simplest, fastest</text>
+
+      <!-- Yes context, no interaction -->
+      <line x1="200" y1="127" x2="230" y2="160" stroke="var(--gray)" stroke-width="1.5"/>
+      <text x="225" y="147" text-anchor="middle" fill="var(--blue)" font-size="10">Yes</text>
+      <rect x="170" y="160" width="120" height="45" rx="8" fill="var(--orange)" opacity="0.85"/>
+      <text x="230" y="180" text-anchor="middle" fill="white" font-size="12" font-weight="700">ContextGAM</text>
+      <text x="230" y="197" text-anchor="middle" fill="white" font-size="9">Best NDCG</text>
+
+      <!-- No context, yes interaction -->
+      <line x1="480" y1="127" x2="430" y2="160" stroke="var(--gray)" stroke-width="1.5"/>
+      <text x="445" y="147" text-anchor="middle" fill="var(--green)" font-size="10">No</text>
+      <rect x="370" y="160" width="120" height="45" rx="8" fill="#3b82f6" opacity="0.85"/>
+      <text x="430" y="180" text-anchor="middle" fill="white" font-size="12" font-weight="700">GA2M_Paper</text>
+      <text x="430" y="197" text-anchor="middle" fill="white" font-size="9">+pairs</text>
+
+      <!-- Yes context, yes interaction -->
+      <line x1="580" y1="127" x2="610" y2="160" stroke="var(--gray)" stroke-width="1.5"/>
+      <text x="605" y="147" text-anchor="middle" fill="var(--blue)" font-size="10">Yes</text>
+      <rect x="545" y="160" width="130" height="45" rx="8" fill="var(--orange)" opacity="0.75"/>
+      <text x="610" y="178" text-anchor="middle" fill="white" font-size="11" font-weight="700">ContextPresent</text>
+      <text x="610" y="195" text-anchor="middle" fill="white" font-size="11" font-weight="700">GA2M</text>
+
+      <!-- Bottom: diversity / multi-objective decision -->
+      <line x1="340" y1="208" x2="340" y2="240" stroke="var(--gray)" stroke-width="1.5" stroke-dasharray="4"/>
+      <text x="340" y="250" text-anchor="middle" fill="#1e293b" font-size="12" font-weight="600">Need diversity or multiple objectives?</text>
+
+      <rect x="100" y="270" width="180" height="40" rx="8" fill="var(--green)" opacity="0.85"/>
+      <text x="190" y="295" text-anchor="middle" fill="white" font-size="11" font-weight="700">SubmodularRankingGAM</text>
+      <line x1="260" y1="258" x2="210" y2="270" stroke="var(--gray)" stroke-width="1.5"/>
+      <text x="220" y="265" fill="var(--green)" font-size="9">diversity</text>
+
+      <rect x="400" y="270" width="180" height="40" rx="8" fill="var(--purple)" opacity="0.85"/>
+      <text x="490" y="295" text-anchor="middle" fill="white" font-size="11" font-weight="700">MultiObjectiveRankingGAM</text>
+      <line x1="420" y1="258" x2="470" y2="270" stroke="var(--gray)" stroke-width="1.5"/>
+      <text x="460" y="265" fill="var(--purple)" font-size="9">multi-obj</text>
+    </svg>
+  </div>
+</section>
+<!-- ==================== SECTION 5: DIVERSITY & SUBMODULARITY ==================== -->
+
+<!-- Slide 18: The Diversity Problem -->
+<section>
+  <h2>The Diversity Problem</h2>
+  <p>Pure relevance ranking &rarr; homogeneous results. Users want <strong>variety</strong>.</p>
+  <div class="two-col">
+    <div class="center">
+      <svg width="250" height="260" viewBox="0 0 250 260">
+        <text x="125" y="18" text-anchor="middle" fill="var(--red)" font-size="12" font-weight="600">Relevance Only</text>
+        <rect x="20" y="30" width="210" height="35" rx="4" fill="var(--blue)" opacity="0.9"/>
+        <text x="125" y="52" text-anchor="middle" fill="white" font-size="11">Blue Sneaker (rel=4)</text>
+        <rect x="20" y="70" width="210" height="35" rx="4" fill="var(--blue)" opacity="0.8"/>
+        <text x="125" y="92" text-anchor="middle" fill="white" font-size="11">Blue Running Shoe (rel=4)</text>
+        <rect x="20" y="110" width="210" height="35" rx="4" fill="var(--blue)" opacity="0.7"/>
+        <text x="125" y="132" text-anchor="middle" fill="white" font-size="11">Blue Athletic Shoe (rel=3)</text>
+        <rect x="20" y="150" width="210" height="35" rx="4" fill="var(--blue)" opacity="0.6"/>
+        <text x="125" y="172" text-anchor="middle" fill="white" font-size="11">Blue Walking Shoe (rel=3)</text>
+        <rect x="20" y="190" width="210" height="35" rx="4" fill="var(--blue)" opacity="0.5"/>
+        <text x="125" y="212" text-anchor="middle" fill="white" font-size="11">Blue Casual Shoe (rel=3)</text>
+        <text x="125" y="248" text-anchor="middle" fill="var(--red)" font-size="11">All blue, all shoes...</text>
+      </svg>
+    </div>
+    <div class="center fragment">
+      <svg width="250" height="260" viewBox="0 0 250 260">
+        <text x="125" y="18" text-anchor="middle" fill="var(--green)" font-size="12" font-weight="600">With Diversity</text>
+        <rect x="20" y="30" width="210" height="35" rx="4" fill="var(--blue)" opacity="0.9"/>
+        <text x="125" y="52" text-anchor="middle" fill="white" font-size="11">Blue Sneaker (rel=4)</text>
+        <rect x="20" y="70" width="210" height="35" rx="4" fill="var(--red)" opacity="0.7"/>
+        <text x="125" y="92" text-anchor="middle" fill="white" font-size="11">Red Hiking Boot (rel=3)</text>
+        <rect x="20" y="110" width="210" height="35" rx="4" fill="#000" opacity="0.7"/>
+        <text x="125" y="132" text-anchor="middle" fill="white" font-size="11">Black Formal Shoe (rel=3)</text>
+        <rect x="20" y="150" width="210" height="35" rx="4" fill="var(--green)" opacity="0.7"/>
+        <text x="125" y="172" text-anchor="middle" fill="white" font-size="11">Green Sandal (rel=2)</text>
+        <rect x="20" y="190" width="210" height="35" rx="4" fill="var(--orange)" opacity="0.7"/>
+        <text x="125" y="212" text-anchor="middle" fill="white" font-size="11">Brown Loafer (rel=2)</text>
+        <text x="125" y="248" text-anchor="middle" fill="var(--green)" font-size="11">Varied colors, styles, prices</text>
+      </svg>
+    </div>
+  </div>
+</section>
+
+<!-- Slide 19: Submodularity Intuition -->
+<section>
+  <h2>Submodularity — Diminishing Returns</h2>
+  <div class="eq-green">
+    f(A &cup; {e}) - f(A) &ge; f(B &cup; {e}) - f(B) &nbsp;&nbsp; when A &sube; B
+  </div>
+  <p>Adding item <em>e</em> to a <strong>smaller</strong> set gives <strong>more</strong> marginal value than to a larger set.</p>
+  <div class="center">
+    <svg width="600" height="230" viewBox="0 0 600 230">
+      <!-- Bar chart showing diminishing marginal gains -->
+      <line x1="60" y1="190" x2="560" y2="190" stroke="var(--gray)" stroke-width="1.5"/>
+      <line x1="60" y1="190" x2="60" y2="20" stroke="var(--gray)" stroke-width="1.5"/>
+      <text x="310" y="220" text-anchor="middle" fill="var(--gray)" font-size="12">Greedy selection step</text>
+      <text x="25" y="105" text-anchor="middle" fill="var(--gray)" font-size="11" transform="rotate(-90,25,105)">Marginal gain</text>
+
+      <!-- Bars (decreasing) -->
+      <rect x="80" y="30" width="55" height="160" rx="4" fill="var(--green)" opacity="0.9"/>
+      <text x="107" y="205" text-anchor="middle" fill="var(--gray)" font-size="11">Step 1</text>
+
+      <rect x="160" y="60" width="55" height="130" rx="4" fill="var(--green)" opacity="0.75"/>
+      <text x="187" y="205" text-anchor="middle" fill="var(--gray)" font-size="11">Step 2</text>
+
+      <rect x="240" y="90" width="55" height="100" rx="4" fill="var(--green)" opacity="0.6"/>
+      <text x="267" y="205" text-anchor="middle" fill="var(--gray)" font-size="11">Step 3</text>
+
+      <rect x="320" y="115" width="55" height="75" rx="4" fill="var(--green)" opacity="0.5"/>
+      <text x="347" y="205" text-anchor="middle" fill="var(--gray)" font-size="11">Step 4</text>
+
+      <rect x="400" y="140" width="55" height="50" rx="4" fill="var(--green)" opacity="0.4"/>
+      <text x="427" y="205" text-anchor="middle" fill="var(--gray)" font-size="11">Step 5</text>
+
+      <rect x="480" y="158" width="55" height="32" rx="4" fill="var(--green)" opacity="0.3"/>
+      <text x="507" y="205" text-anchor="middle" fill="var(--gray)" font-size="11">Step 6</text>
+
+      <!-- Diminishing returns curve overlay -->
+      <polyline points="107,28 187,58 267,88 347,113 427,138 507,156"
+                fill="none" stroke="var(--red)" stroke-width="2" stroke-dasharray="5,3"/>
+    </svg>
+  </div>
+  <div class="box-green fragment">
+    <strong>Greedy guarantee:</strong> For submodular functions, greedy selection achieves at least <strong>(1 - 1/e) &asymp; 63%</strong> of the optimal solution. ConcavePWL towers enforce submodularity by construction.
+  </div>
+</section>
+
+<!-- Slide 20: SubmodularRankingGAM Architecture -->
+<section>
+  <h2>SubmodularRankingGAM</h2>
+  <div class="center">
+    <svg width="700" height="290" viewBox="0 0 700 290">
+      <!-- Item towers block -->
+      <rect x="10" y="20" width="200" height="100" rx="8" fill="var(--blue-bg)" stroke="var(--blue)" stroke-width="2"/>
+      <text x="110" y="48" text-anchor="middle" fill="var(--blue)" font-size="13" font-weight="600">Item Towers</text>
+      <text x="110" y="70" text-anchor="middle" fill="var(--blue)" font-size="11">PaperTower &times; D</text>
+      <text x="110" y="90" text-anchor="middle" fill="var(--gray)" font-size="10">Unconstrained MLP</text>
+      <text x="110" y="107" text-anchor="middle" fill="var(--gray)" font-size="9">Set-independent</text>
+
+      <!-- Diversity towers block -->
+      <rect x="10" y="140" width="200" height="110" rx="8" fill="var(--green-bg)" stroke="var(--green)" stroke-width="2"/>
+      <text x="110" y="168" text-anchor="middle" fill="var(--green)" font-size="13" font-weight="600">Diversity Towers</text>
+      <text x="110" y="190" text-anchor="middle" fill="var(--green)" font-size="11">ConcavePWL &times; K</text>
+      <text x="110" y="210" text-anchor="middle" fill="var(--gray)" font-size="10">Monotone + Concave</text>
+      <text x="110" y="230" text-anchor="middle" fill="var(--gray)" font-size="9">Set-dependent (via GroupwiseFeatures)</text>
+
+      <!-- Arrows -->
+      <line x1="215" y1="70" x2="310" y2="70" stroke="var(--blue)" stroke-width="2" marker-end="url(#arrowRight)"/>
+      <text x="262" y="62" text-anchor="middle" fill="var(--blue)" font-size="10">base scores</text>
+
+      <line x1="215" y1="195" x2="310" y2="195" stroke="var(--green)" stroke-width="2" marker-end="url(#arrowRight)"/>
+      <text x="262" y="187" text-anchor="middle" fill="var(--green)" font-size="10">div scores</text>
+
+      <!-- Groupwise feature computer -->
+      <rect x="250" y="130" width="55" height="45" rx="4" fill="var(--green)" opacity="0.15" stroke="var(--green)" stroke-width="1" stroke-dasharray="3"/>
+      <text x="277" y="148" text-anchor="middle" fill="var(--green)" font-size="7">Groupwise</text>
+      <text x="277" y="160" text-anchor="middle" fill="var(--green)" font-size="7">Features</text>
+      <line x1="277" y1="175" x2="277" y2="190" stroke="var(--green)" stroke-width="1"/>
+
+      <!-- Sum at greedy step -->
+      <rect x="320" y="40" width="150" height="200" rx="8" fill="#fafafa" stroke="var(--gray)" stroke-width="1.5" stroke-dasharray="5"/>
+      <text x="395" y="60" text-anchor="middle" fill="var(--gray)" font-size="11" font-weight="600">Greedy Step t</text>
+
+      <circle cx="395" cy="130" r="22" fill="var(--green)" opacity="0.2" stroke="var(--green)" stroke-width="2"/>
+      <text x="395" y="137" text-anchor="middle" fill="var(--green)" font-size="16" font-weight="700">+</text>
+      <line x1="350" y1="70" x2="380" y2="115" stroke="var(--blue)" stroke-width="1.5"/>
+      <line x1="350" y1="195" x2="380" y2="148" stroke="var(--green)" stroke-width="1.5"/>
+
+      <text x="395" y="170" text-anchor="middle" fill="var(--gray)" font-size="9">marginal_gain(i|S)</text>
+      <text x="395" y="185" text-anchor="middle" fill="var(--gray)" font-size="9">= base(i) + div(i|S)</text>
+
+      <line x1="420" y1="130" x2="445" y2="130" stroke="var(--gray)" stroke-width="1.5"/>
+      <text x="452" y="125" text-anchor="middle" fill="var(--gray)" font-size="9">argmax</text>
+      <text x="452" y="140" text-anchor="middle" fill="var(--gray)" font-size="9">&rarr; select</text>
+
+      <!-- Output: selected ordering -->
+      <line x1="480" y1="130" x2="520" y2="130" stroke="var(--gray)" stroke-width="2" marker-end="url(#arrowRight)"/>
+
+      <rect x="525" y="40" width="150" height="200" rx="8" fill="var(--green)" opacity="0.1" stroke="var(--green)" stroke-width="2"/>
+      <text x="600" y="65" text-anchor="middle" fill="var(--green)" font-size="12" font-weight="600">Selected Order</text>
+      <!-- Items -->
+      <rect x="545" y="80" width="110" height="25" rx="4" fill="var(--blue)" opacity="0.8"/>
+      <text x="600" y="97" text-anchor="middle" fill="white" font-size="10">1st: Item 42</text>
+      <rect x="545" y="110" width="110" height="25" rx="4" fill="var(--red)" opacity="0.6"/>
+      <text x="600" y="127" text-anchor="middle" fill="white" font-size="10">2nd: Item 7</text>
+      <rect x="545" y="140" width="110" height="25" rx="4" fill="#000" opacity="0.5"/>
+      <text x="600" y="157" text-anchor="middle" fill="white" font-size="10">3rd: Item 91</text>
+      <rect x="545" y="170" width="110" height="25" rx="4" fill="var(--green)" opacity="0.5"/>
+      <text x="600" y="187" text-anchor="middle" fill="white" font-size="10">4th: Item 15</text>
+      <text x="600" y="220" text-anchor="middle" fill="var(--gray)" font-size="10">k items total</text>
+
+      <!-- Two-phase training label -->
+      <text x="350" y="275" text-anchor="middle" fill="var(--gray)" font-size="11" font-weight="600">Two-phase training: (1) train item towers &rarr; (2) freeze, train diversity towers</text>
+    </svg>
+  </div>
+</section>
+
+<!-- Slide 21: Groupwise Features -->
+<section>
+  <h2>Groupwise Features — Set-Dependent</h2>
+  <p>Features that depend on what's <strong>already been selected</strong>:</p>
+  <div class="center">
+    <svg width="680" height="250" viewBox="0 0 680 250">
+      <!-- Feature cards -->
+      <rect x="10" y="10" width="130" height="90" rx="6" fill="var(--green-bg)" stroke="var(--green)" stroke-width="1.5"/>
+      <text x="75" y="32" text-anchor="middle" fill="var(--green)" font-size="10" font-weight="600">category_novelty</text>
+      <text x="75" y="52" text-anchor="middle" fill="var(--gray)" font-size="9">1 - |same_cat(S)|</text>
+      <text x="75" y="66" text-anchor="middle" fill="var(--gray)" font-size="9">&nbsp;&nbsp;&nbsp;/ max(|S|, 1)</text>
+      <text x="75" y="88" text-anchor="middle" fill="var(--gray)" font-size="8">How novel is this category?</text>
+
+      <rect x="150" y="10" width="130" height="90" rx="6" fill="var(--green-bg)" stroke="var(--green)" stroke-width="1.5"/>
+      <text x="215" y="32" text-anchor="middle" fill="var(--green)" font-size="10" font-weight="600">brand_novelty</text>
+      <text x="215" y="52" text-anchor="middle" fill="var(--gray)" font-size="9">1 - |same_brand(S)|</text>
+      <text x="215" y="66" text-anchor="middle" fill="var(--gray)" font-size="9">&nbsp;&nbsp;&nbsp;/ max(|S|, 1)</text>
+      <text x="215" y="88" text-anchor="middle" fill="var(--gray)" font-size="8">How novel is this brand?</text>
+
+      <rect x="290" y="10" width="130" height="90" rx="6" fill="var(--green-bg)" stroke="var(--green)" stroke-width="1.5"/>
+      <text x="355" y="32" text-anchor="middle" fill="var(--green)" font-size="10" font-weight="600">visual_diversity</text>
+      <text x="355" y="52" text-anchor="middle" fill="var(--gray)" font-size="9">1 - max_cosine</text>
+      <text x="355" y="66" text-anchor="middle" fill="var(--gray)" font-size="9">&nbsp;&nbsp;_sim(item, S)</text>
+      <text x="355" y="88" text-anchor="middle" fill="var(--gray)" font-size="8">Embedding distance</text>
+
+      <rect x="430" y="10" width="120" height="90" rx="6" fill="var(--green-bg)" stroke="var(--green)" stroke-width="1.5"/>
+      <text x="490" y="32" text-anchor="middle" fill="var(--green)" font-size="10" font-weight="600">price_spread</text>
+      <text x="490" y="52" text-anchor="middle" fill="var(--gray)" font-size="9">|p_i - mean(S)|</text>
+      <text x="490" y="66" text-anchor="middle" fill="var(--gray)" font-size="9">&nbsp;&nbsp;/ (std(S) + &epsilon;)</text>
+      <text x="490" y="88" text-anchor="middle" fill="var(--gray)" font-size="8">Price variety</text>
+
+      <rect x="560" y="10" width="110" height="90" rx="6" fill="var(--green-bg)" stroke="var(--green)" stroke-width="1.5"/>
+      <text x="615" y="32" text-anchor="middle" fill="var(--green)" font-size="10" font-weight="600">attr_coverage</text>
+      <text x="615" y="52" text-anchor="middle" fill="var(--gray)" font-size="9">new_attrs</text>
+      <text x="615" y="66" text-anchor="middle" fill="var(--gray)" font-size="9">/ total_attrs</text>
+      <text x="615" y="88" text-anchor="middle" fill="var(--gray)" font-size="8">New attributes</text>
+
+      <!-- Example: how novelty changes -->
+      <text x="340" y="125" text-anchor="middle" fill="var(--gray)" font-size="12" font-weight="600">Example: Category Novelty Over Selection Steps</text>
+
+      <rect x="30" y="140" width="620" height="95" rx="6" fill="#fafafa" stroke="var(--gray-light)" stroke-width="1"/>
+
+      <!-- Step 0 -->
+      <text x="100" y="160" text-anchor="middle" fill="var(--gray)" font-size="10" font-weight="600">S = {}</text>
+      <text x="100" y="178" text-anchor="middle" fill="var(--green)" font-size="11">novelty = 1.0</text>
+      <text x="100" y="195" text-anchor="middle" fill="var(--gray)" font-size="9">Everything is new</text>
+
+      <text x="190" y="178" text-anchor="middle" fill="var(--gray)" font-size="14">&rarr;</text>
+
+      <!-- Step 1 -->
+      <text x="280" y="160" text-anchor="middle" fill="var(--gray)" font-size="10" font-weight="600">S = {shoe}</text>
+      <text x="280" y="178" text-anchor="middle" fill="var(--orange)" font-size="11">shoe: 0.0, boot: 1.0</text>
+      <text x="280" y="195" text-anchor="middle" fill="var(--gray)" font-size="9">Boot is novel, shoe isn't</text>
+
+      <text x="370" y="178" text-anchor="middle" fill="var(--gray)" font-size="14">&rarr;</text>
+
+      <!-- Step 2 -->
+      <text x="470" y="160" text-anchor="middle" fill="var(--gray)" font-size="10" font-weight="600">S = {shoe, boot}</text>
+      <text x="470" y="178" text-anchor="middle" fill="var(--red)" font-size="11">shoe: 0.0, boot: 0.0</text>
+      <text x="470" y="195" text-anchor="middle" fill="var(--gray)" font-size="9">sandal: 1.0 &larr; most novel</text>
+
+      <text x="560" y="178" text-anchor="middle" fill="var(--gray)" font-size="14">&rarr;</text>
+
+      <text x="620" y="178" text-anchor="middle" fill="var(--gray)" font-size="10">...</text>
+    </svg>
+  </div>
+</section>
+
+<!-- Slide 22: Greedy Reranking -->
+<section>
+  <h2>Greedy Reranking Algorithm</h2>
+  <div class="two-col">
+    <div>
+      <pre><code class="language-python">def greedy_rerank(self, x, k=None):
+    base = self.base_scores(x)  # [L]
+    selected = []
+
+    for step in range(k):
+        candidates = remaining(x)
+        # Compute set-dependent features
+        gw = feature_computer.compute(
+            candidates, selected, x
+        )
+        # Score through ConcavePWL
+        div = diversity_towers(gw)
+        # Total marginal gain
+        gain = base[cand] + div
+        # Select best
+        best = argmax(gain)
+        selected.append(best)
+
+    return selected  # [k] indices</code></pre>
+    </div>
+    <div class="center">
+      <svg width="280" height="280" viewBox="0 0 280 280">
+        <text x="140" y="18" text-anchor="middle" fill="var(--gray)" font-size="11" font-weight="600">Marginal Gain at Each Step</text>
+        <!-- Candidate items at step 3 -->
+        <rect x="10" y="30" width="260" height="30" rx="4" fill="var(--blue)" opacity="0.2"/>
+        <text x="20" y="50" fill="var(--gray)" font-size="10" font-weight="600">Step 3 (S has 2 items):</text>
+
+        <rect x="20" y="70" width="220" height="22" rx="3" fill="var(--green)" opacity="0.7"/>
+        <text x="25" y="85" fill="white" font-size="9">Item 15: base=0.8 + div=0.6 = 1.4</text>
+        <text x="245" y="85" fill="var(--green)" font-size="10" font-weight="700">&larr; pick!</text>
+
+        <rect x="20" y="97" width="190" height="22" rx="3" fill="var(--blue)" opacity="0.4"/>
+        <text x="25" y="112" fill="white" font-size="9">Item 42: base=0.9 + div=0.3 = 1.2</text>
+
+        <rect x="20" y="124" width="160" height="22" rx="3" fill="var(--blue)" opacity="0.3"/>
+        <text x="25" y="139" fill="white" font-size="9">Item 7:  base=0.7 + div=0.3 = 1.0</text>
+
+        <rect x="20" y="151" width="120" height="22" rx="3" fill="var(--blue)" opacity="0.2"/>
+        <text x="25" y="166" fill="white" font-size="9">Item 3:  base=0.5 + div=0.2 = 0.7</text>
+
+        <!-- Guarantee box -->
+        <rect x="15" y="195" width="250" height="70" rx="8" fill="var(--green-bg)" stroke="var(--green)" stroke-width="2"/>
+        <text x="140" y="218" text-anchor="middle" fill="var(--green)" font-size="12" font-weight="600">Optimality Guarantee</text>
+        <text x="140" y="238" text-anchor="middle" fill="var(--green)" font-size="11">Greedy &ge; (1 - 1/e) &times; OPT</text>
+        <text x="140" y="255" text-anchor="middle" fill="var(--green)" font-size="11">&asymp; 63% of optimal</text>
+      </svg>
+    </div>
+  </div>
+</section>
+
+<!-- Slide 22b: Interactive Submodular Reranking Demo -->
+<section data-background-color="#f5f4f1">
+  <h2 style="margin:0 0 8px 0; font-size:1.1em;">Interactive Demo — Greedy Submodular Reranking</h2>
+  <p class="small" style="margin:0 0 8px 0; color:var(--gray);">
+    Click <strong>Start</strong> to auto-run or <strong>Step</strong> to advance one greedy pick at a time. Each stacked bar = GAM feature breakdown.
+  </p>
+  <div style="position:relative; width:100%; height:520px; border:1px solid var(--gray-light); border-radius:8px; overflow:hidden;">
+    <iframe src="submodular_reranking_demo.html"
+            style="width:100%; height:100%; border:none; border-radius:8px;"
+            loading="lazy"></iframe>
+  </div>
+</section>
+
+<!-- Slide 23: Two-Phase Training -->
+<section>
+  <h2>Two-Phase Training Pipeline</h2>
+  <div class="center">
+    <svg width="700" height="220" viewBox="0 0 700 220">
+      <!-- Phase 1 -->
+      <rect x="10" y="30" width="300" height="140" rx="10" fill="var(--blue-bg)" stroke="var(--blue)" stroke-width="2"/>
+      <text x="160" y="55" text-anchor="middle" fill="var(--blue)" font-size="14" font-weight="700">Phase 1: Base Training</text>
+
+      <rect x="30" y="70" width="120" height="35" rx="4" fill="var(--blue)" opacity="0.2" stroke="var(--blue)" stroke-width="1"/>
+      <text x="90" y="92" text-anchor="middle" fill="var(--blue)" font-size="10">Item Towers</text>
+
+      <text x="165" y="92" text-anchor="middle" fill="var(--gray)" font-size="10">+</text>
+
+      <rect x="180" y="70" width="110" height="35" rx="4" fill="var(--blue)" opacity="0.2" stroke="var(--blue)" stroke-width="1"/>
+      <text x="235" y="92" text-anchor="middle" fill="var(--blue)" font-size="10">LambdaLoss</text>
+
+      <text x="160" y="125" text-anchor="middle" fill="var(--gray)" font-size="10">Train with standard ranking loss</text>
+      <text x="160" y="145" text-anchor="middle" fill="var(--gray)" font-size="10">30 epochs, LR schedule, early stopping</text>
+      <text x="160" y="160" text-anchor="middle" fill="var(--blue)" font-size="10" font-weight="600">train_model(submod, ...)</text>
+
+      <!-- Arrow between phases -->
+      <line x1="315" y1="100" x2="375" y2="100" stroke="var(--gray)" stroke-width="3" marker-end="url(#arrowRight)"/>
+      <text x="345" y="90" text-anchor="middle" fill="var(--gray)" font-size="10">freeze</text>
+      <text x="345" y="118" text-anchor="middle" fill="var(--gray)" font-size="10">base</text>
+
+      <!-- Phase 2 -->
+      <rect x="380" y="30" width="300" height="140" rx="10" fill="var(--green-bg)" stroke="var(--green)" stroke-width="2"/>
+      <text x="530" y="55" text-anchor="middle" fill="var(--green)" font-size="14" font-weight="700">Phase 2: Diversity Training</text>
+
+      <rect x="400" y="70" width="120" height="35" rx="4" fill="var(--green)" opacity="0.2" stroke="var(--green)" stroke-width="1"/>
+      <text x="460" y="92" text-anchor="middle" fill="var(--green)" font-size="10">Diversity Towers</text>
+
+      <text x="535" y="92" text-anchor="middle" fill="var(--gray)" font-size="10">+</text>
+
+      <rect x="550" y="70" width="110" height="35" rx="4" fill="var(--green)" opacity="0.2" stroke="var(--green)" stroke-width="1"/>
+      <text x="605" y="92" text-anchor="middle" fill="var(--green)" font-size="10">ListNet Loss</text>
+
+      <text x="530" y="125" text-anchor="middle" fill="var(--gray)" font-size="10">Greedy selection per query</text>
+      <text x="530" y="145" text-anchor="middle" fill="var(--gray)" font-size="10">Step-wise ListNet + position weighting</text>
+      <text x="530" y="160" text-anchor="middle" fill="var(--green)" font-size="10" font-weight="600">train_diversity_towers(submod, ...)</text>
+
+      <!-- Bottom caption -->
+      <text x="350" y="200" text-anchor="middle" fill="var(--gray)" font-size="11">Position discount: 1/log<sub>2</sub>(step + 2) &mdash; earlier positions matter more</text>
+    </svg>
+  </div>
+</section>
+<!-- ==================== SECTION 6: MULTI-OBJECTIVE ==================== -->
+
+<!-- Slide 24: MultiObjectiveRankingGAM -->
+<section>
+  <h2>MultiObjectiveRankingGAM</h2>
+  <p>Multiple objectives with <strong>runtime-adjustable weights</strong> &mdash; no retraining needed.</p>
+  <div class="center">
+    <svg width="680" height="260" viewBox="0 0 680 260">
+      <!-- Objectives -->
+      <rect x="10" y="20" width="160" height="55" rx="6" fill="var(--blue-bg)" stroke="var(--blue)" stroke-width="2"/>
+      <text x="90" y="43" text-anchor="middle" fill="var(--blue)" font-size="12" font-weight="600">Relevance</text>
+      <text x="90" y="63" text-anchor="middle" fill="var(--gray)" font-size="10">Pointwise towers (MLP)</text>
+
+      <rect x="10" y="85" width="160" height="55" rx="6" fill="var(--green-bg)" stroke="var(--green)" stroke-width="2"/>
+      <text x="90" y="108" text-anchor="middle" fill="var(--green)" font-size="12" font-weight="600">Diversity</text>
+      <text x="90" y="128" text-anchor="middle" fill="var(--gray)" font-size="10">Groupwise (ConcavePWL)</text>
+
+      <rect x="10" y="150" width="160" height="55" rx="6" fill="var(--orange-bg)" stroke="var(--orange)" stroke-width="2"/>
+      <text x="90" y="173" text-anchor="middle" fill="var(--orange)" font-size="12" font-weight="600">Freshness</text>
+      <text x="90" y="193" text-anchor="middle" fill="var(--gray)" font-size="10">Pointwise (MonotonePWL)</text>
+
+      <rect x="10" y="215" width="160" height="40" rx="6" fill="var(--purple-bg)" stroke="var(--purple)" stroke-width="1.5"/>
+      <text x="90" y="240" text-anchor="middle" fill="var(--purple)" font-size="12" font-weight="600">Revenue</text>
+
+      <!-- Weight sliders -->
+      <rect x="200" y="35" width="100" height="18" rx="9" fill="var(--gray-light)"/>
+      <circle cx="270" cy="44" r="8" fill="var(--blue)"/>
+      <text x="310" y="48" fill="var(--blue)" font-size="11" font-weight="600">w=0.5</text>
+
+      <rect x="200" y="100" width="100" height="18" rx="9" fill="var(--gray-light)"/>
+      <circle cx="260" cy="109" r="8" fill="var(--green)"/>
+      <text x="310" y="113" fill="var(--green)" font-size="11" font-weight="600">w=0.3</text>
+
+      <rect x="200" y="165" width="100" height="18" rx="9" fill="var(--gray-light)"/>
+      <circle cx="230" cy="174" r="8" fill="var(--orange)"/>
+      <text x="310" y="178" fill="var(--orange)" font-size="11" font-weight="600">w=0.1</text>
+
+      <rect x="200" y="225" width="100" height="18" rx="9" fill="var(--gray-light)"/>
+      <circle cx="225" cy="234" r="8" fill="var(--purple)"/>
+      <text x="310" y="238" fill="var(--purple)" font-size="11" font-weight="600">w=0.1</text>
+
+      <!-- Sum formula -->
+      <rect x="360" y="80" width="150" height="90" rx="8" fill="#fafafa" stroke="var(--gray)" stroke-width="1.5"/>
+      <text x="435" y="105" text-anchor="middle" fill="var(--gray)" font-size="11" font-weight="600">Weighted Sum</text>
+      <text x="435" y="128" text-anchor="middle" fill="var(--gray)" font-size="11">marginal(i|S) =</text>
+      <text x="435" y="148" text-anchor="middle" fill="var(--gray)" font-size="11">&sum; w<sub>obj</sub> &middot; score<sub>obj</sub>(i|S)</text>
+
+      <!-- Arrow -->
+      <line x1="515" y1="125" x2="555" y2="125" stroke="var(--gray)" stroke-width="2" marker-end="url(#arrowRight)"/>
+
+      <!-- Greedy output -->
+      <rect x="560" y="50" width="110" height="150" rx="8" fill="var(--green)" opacity="0.1" stroke="var(--green)" stroke-width="2"/>
+      <text x="615" y="75" text-anchor="middle" fill="var(--green)" font-size="11" font-weight="600">Greedy</text>
+      <text x="615" y="92" text-anchor="middle" fill="var(--green)" font-size="11" font-weight="600">Rerank</text>
+      <rect x="575" y="105" width="80" height="18" rx="3" fill="var(--blue)" opacity="0.7"/>
+      <text x="615" y="118" text-anchor="middle" fill="white" font-size="9">Item 42</text>
+      <rect x="575" y="128" width="80" height="18" rx="3" fill="var(--green)" opacity="0.6"/>
+      <text x="615" y="141" text-anchor="middle" fill="white" font-size="9">Item 7</text>
+      <rect x="575" y="151" width="80" height="18" rx="3" fill="var(--orange)" opacity="0.5"/>
+      <text x="615" y="164" text-anchor="middle" fill="white" font-size="9">Item 91</text>
+      <rect x="575" y="174" width="80" height="18" rx="3" fill="var(--purple)" opacity="0.5"/>
+      <text x="615" y="187" text-anchor="middle" fill="white" font-size="9">Item 3</text>
+    </svg>
+  </div>
+</section>
+
+<!-- Slide 25: Runtime Weight Control -->
+<section>
+  <h2>Runtime Weight Control — No Retraining</h2>
+  <div class="two-col">
+    <div>
+      <pre><code class="language-python"># Same trained model, different behaviors:
+
+# Relevance-focused
+ranking_a = mo_model.greedy_rerank(x,
+    weights={"relevance": 0.8,
+             "diversity": 0.1,
+             "freshness": 0.1})
+
+# Diversity-focused
+ranking_b = mo_model.greedy_rerank(x,
+    weights={"relevance": 0.3,
+             "diversity": 0.6,
+             "freshness": 0.1})
+
+# Fresh content push
+ranking_c = mo_model.greedy_rerank(x,
+    weights={"relevance": 0.3,
+             "diversity": 0.1,
+             "freshness": 0.6})</code></pre>
+    </div>
+    <div class="center">
+      <svg width="280" height="260" viewBox="0 0 280 260">
+        <text x="140" y="18" text-anchor="middle" fill="var(--gray)" font-size="11" font-weight="600">Same Model, Different Rankings</text>
+        <!-- Config A -->
+        <rect x="10" y="30" width="80" height="80" rx="6" fill="var(--blue-bg)" stroke="var(--blue)" stroke-width="1.5"/>
+        <text x="50" y="50" text-anchor="middle" fill="var(--blue)" font-size="9" font-weight="600">Relevance</text>
+        <text x="50" y="70" text-anchor="middle" fill="var(--blue)" font-size="18">A A A</text>
+        <text x="50" y="85" text-anchor="middle" fill="var(--gray)" font-size="8">Similar items</text>
+        <text x="50" y="100" text-anchor="middle" fill="var(--gray)" font-size="8">but most relevant</text>
+
+        <!-- Config B -->
+        <rect x="100" y="30" width="80" height="80" rx="6" fill="var(--green-bg)" stroke="var(--green)" stroke-width="1.5"/>
+        <text x="140" y="50" text-anchor="middle" fill="var(--green)" font-size="9" font-weight="600">Diverse</text>
+        <text x="140" y="70" text-anchor="middle" fill="var(--green)" font-size="18">A B C</text>
+        <text x="140" y="85" text-anchor="middle" fill="var(--gray)" font-size="8">Mixed categories</text>
+        <text x="140" y="100" text-anchor="middle" fill="var(--gray)" font-size="8">and brands</text>
+
+        <!-- Config C -->
+        <rect x="190" y="30" width="80" height="80" rx="6" fill="var(--orange-bg)" stroke="var(--orange)" stroke-width="1.5"/>
+        <text x="230" y="50" text-anchor="middle" fill="var(--orange)" font-size="9" font-weight="600">Fresh</text>
+        <text x="230" y="70" text-anchor="middle" fill="var(--orange)" font-size="18">N N N</text>
+        <text x="230" y="85" text-anchor="middle" fill="var(--gray)" font-size="8">Newest items</text>
+        <text x="230" y="100" text-anchor="middle" fill="var(--gray)" font-size="8">prioritized</text>
+
+        <!-- Key insight -->
+        <rect x="10" y="130" width="260" height="60" rx="8" fill="var(--purple-bg)" stroke="var(--purple)" stroke-width="2"/>
+        <text x="140" y="152" text-anchor="middle" fill="var(--purple)" font-size="12" font-weight="600">Key Property</text>
+        <text x="140" y="172" text-anchor="middle" fill="var(--purple)" font-size="11">Weighted sum of submodular = submodular</text>
+        <text x="140" y="185" text-anchor="middle" fill="var(--purple)" font-size="10">&rArr; Greedy is still (1-1/e) optimal!</text>
+
+        <!-- Use cases -->
+        <text x="140" y="215" text-anchor="middle" fill="var(--gray)" font-size="10" font-weight="600">Use cases:</text>
+        <text x="140" y="232" text-anchor="middle" fill="var(--gray)" font-size="10">A/B testing, time-of-day tuning,</text>
+        <text x="140" y="248" text-anchor="middle" fill="var(--gray)" font-size="10">per-user personalization</text>
+      </svg>
+    </div>
+  </div>
+</section>
+<!-- ==================== SECTION 7: TRAINING & LOSSES ==================== -->
+
+<!-- Slide 26: Loss Function Landscape -->
+<section>
+  <h2>Loss Functions — When to Use What</h2>
+  <table>
+    <tr>
+      <th>Loss</th><th>Type</th><th>Best For</th><th>Key Param</th>
+    </tr>
+    <tr>
+      <td><strong style="color:var(--blue);">LambdaLoss.ndcg2pp()</strong></td>
+      <td>Pairwise + NDCG</td>
+      <td><span class="badge badge-blue">Recommended</span> Best NDCG</td>
+      <td>mu=10, sigma=1</td>
+    </tr>
+    <tr>
+      <td>ApproxNDCGLoss</td>
+      <td>Listwise</td>
+      <td>Direct NDCG optimization</td>
+      <td>alpha=10</td>
+    </tr>
+    <tr>
+      <td>PairwiseLoss (RankNet)</td>
+      <td>Pairwise</td>
+      <td>Stable baseline</td>
+      <td>sigma=1.0</td>
+    </tr>
+    <tr>
+      <td>ListNetLoss</td>
+      <td>Listwise</td>
+      <td>Fast, noisy labels</td>
+      <td>label_smoothing=0.1</td>
+    </tr>
+    <tr>
+      <td>ListMLELoss</td>
+      <td>Listwise</td>
+      <td>Permutation probability</td>
+      <td>&mdash;</td>
+    </tr>
+    <tr>
+      <td>DiffSortNDCGLoss</td>
+      <td>Differentiable sort</td>
+      <td>Smooth NDCG</td>
+      <td>reg_strength</td>
+    </tr>
+  </table>
+  <div class="box" style="margin-top:10px;">
+    All losses accept <code>(y_pred, y_true)</code> both <code>[batch, list_size]</code>. Padding label <code>-1</code> handled internally.
+  </div>
+</section>
+
+<!-- Slide 27: LambdaLoss Deep Dive -->
+<section>
+  <h2>LambdaLoss — The Recommended Choice</h2>
+  <div class="two-col">
+    <div>
+      <p>Unified framework for NDCG-aware pairwise losses:</p>
+      <div class="eq" style="font-size:0.95em;">
+        L = &sum;<sub>i,j: y<sub>i</sub> &gt; y<sub>j</sub></sub> w<sub>ij</sub> &middot; log(1 + e<sup>-&sigma;(s<sub>i</sub>-s<sub>j</sub>)</sup>)
+      </div>
+      <p>Different weighing schemes:</p>
+      <ul class="small">
+        <li><strong>RankNet:</strong> w = 1 (plain pairwise)</li>
+        <li><strong>NDCGLoss1:</strong> w = G/D (gain/discount)</li>
+        <li><strong>NDCGLoss2:</strong> refined &Delta;NDCG weights</li>
+        <li><strong>LambdaRank:</strong> w = |&Delta;pos| &middot; |&Delta;G|</li>
+        <li><strong style="color:var(--blue);">NDCGLoss2++:</strong> &mu; &middot; NDCGLoss2 + LambdaRank</li>
+      </ul>
+    </div>
+    <div class="center">
+      <svg width="280" height="260" viewBox="0 0 280 260">
+        <text x="140" y="18" text-anchor="middle" fill="var(--gray)" font-size="11" font-weight="600">Pairwise NDCG Weighting</text>
+        <!-- Ranked list -->
+        <rect x="30" y="35" width="50" height="25" rx="3" fill="var(--blue)" opacity="0.9"/>
+        <text x="55" y="52" text-anchor="middle" fill="white" font-size="9">rel=4</text>
+        <text x="90" y="52" fill="var(--gray)" font-size="9">pos 1 &mdash; high discount</text>
+
+        <rect x="30" y="65" width="50" height="25" rx="3" fill="var(--blue)" opacity="0.6"/>
+        <text x="55" y="82" text-anchor="middle" fill="white" font-size="9">rel=2</text>
+        <text x="90" y="82" fill="var(--gray)" font-size="9">pos 2</text>
+
+        <rect x="30" y="95" width="50" height="25" rx="3" fill="var(--red)" opacity="0.6"/>
+        <text x="55" y="112" text-anchor="middle" fill="white" font-size="9">rel=0</text>
+        <text x="90" y="112" fill="var(--gray)" font-size="9">pos 3 &mdash; misranked!</text>
+
+        <rect x="30" y="125" width="50" height="25" rx="3" fill="var(--blue)" opacity="0.4"/>
+        <text x="55" y="142" text-anchor="middle" fill="white" font-size="9">rel=3</text>
+        <text x="90" y="142" fill="var(--gray)" font-size="9">pos 4 &mdash; should be higher</text>
+
+        <!-- Weight arrow -->
+        <line x1="55" y1="120" x2="55" y2="130" stroke="var(--red)" stroke-width="3" marker-end="url(#arrowRedDown)"/>
+        <defs><marker id="arrowRedDown" markerWidth="8" markerHeight="6" refX="4" refY="0" orient="auto"><path d="M0,0 L4,6 L8,0" fill="var(--red)"/></marker></defs>
+
+        <text x="140" y="175" text-anchor="middle" fill="var(--red)" font-size="10">Pair (pos3=0, pos4=3):</text>
+        <text x="140" y="195" text-anchor="middle" fill="var(--red)" font-size="10">High weight because swapping</text>
+        <text x="140" y="210" text-anchor="middle" fill="var(--red)" font-size="10">would greatly improve NDCG</text>
+
+        <rect x="20" y="225" width="240" height="28" rx="6" fill="var(--blue-bg)" stroke="var(--blue)" stroke-width="1.5"/>
+        <text x="140" y="244" text-anchor="middle" fill="var(--blue)" font-size="10" font-weight="600">ndcg2++ = best of both worlds</text>
+      </svg>
+    </div>
+  </div>
+</section>
+
+<!-- Slide 28: Training Pipeline -->
+<section>
+  <h2>Training Pipeline</h2>
+  <div class="center">
+    <svg width="700" height="200" viewBox="0 0 700 200">
+      <!-- Training curve -->
+      <rect x="10" y="10" width="320" height="180" rx="6" fill="#fafafa" stroke="var(--gray-light)" stroke-width="1"/>
+      <text x="170" y="30" text-anchor="middle" fill="var(--gray)" font-size="11" font-weight="600">Typical Training Curve</text>
+      <!-- Axes -->
+      <line x1="40" y1="165" x2="310" y2="165" stroke="var(--gray)" stroke-width="1"/>
+      <line x1="40" y1="165" x2="40" y2="40" stroke="var(--gray)" stroke-width="1"/>
+      <text x="175" y="185" text-anchor="middle" fill="var(--gray)" font-size="9">Epoch</text>
+      <text x="25" y="100" text-anchor="middle" fill="var(--gray)" font-size="9" transform="rotate(-90,25,100)">NDCG@10</text>
+
+      <!-- Warmup phase -->
+      <rect x="40" y="35" width="40" height="130" fill="var(--orange)" opacity="0.08"/>
+      <text x="60" y="48" text-anchor="middle" fill="var(--orange)" font-size="7">warmup</text>
+
+      <!-- NDCG curve -->
+      <polyline points="45,155 55,140 65,120 80,100 100,85 130,73 160,68 190,65 220,63 250,62 270,62 290,61"
+                fill="none" stroke="var(--blue)" stroke-width="2.5"/>
+
+      <!-- LR curve -->
+      <polyline points="45,155 55,150 65,145 80,142 100,140 130,138 160,135 190,130 220,122 250,110 270,100 290,90"
+                fill="none" stroke="var(--orange)" stroke-width="1.5" stroke-dasharray="4"/>
+      <text x="295" y="58" fill="var(--blue)" font-size="8">NDCG</text>
+      <text x="295" y="87" fill="var(--orange)" font-size="8">LR</text>
+
+      <!-- Early stop marker -->
+      <line x1="250" y1="55" x2="250" y2="165" stroke="var(--red)" stroke-width="1" stroke-dasharray="3"/>
+      <text x="250" y="50" text-anchor="middle" fill="var(--red)" font-size="8">early stop</text>
+
+      <!-- Config panel -->
+      <rect x="350" y="10" width="340" height="180" rx="6" fill="#fafafa" stroke="var(--gray-light)" stroke-width="1"/>
+      <text x="520" y="35" text-anchor="middle" fill="var(--gray)" font-size="12" font-weight="600">Training Configuration</text>
+
+      <text x="370" y="60" fill="var(--blue)" font-size="11" font-weight="600">Optimizer</text>
+      <text x="370" y="78" fill="var(--gray)" font-size="10">AdamW (weight_decay=0.01)</text>
+      <text x="370" y="93" fill="var(--gray)" font-size="9">Skip/bias params excluded from decay</text>
+
+      <text x="370" y="115" fill="var(--orange)" font-size="11" font-weight="600">LR Schedule</text>
+      <text x="370" y="133" fill="var(--gray)" font-size="10">"cosine" | "plateau" | "constant"</text>
+      <text x="370" y="148" fill="var(--gray)" font-size="9">+ linear warmup (3 epochs, 0.01&rarr;1.0)</text>
+
+      <text x="370" y="170" fill="var(--green)" font-size="11" font-weight="600">Safety</text>
+      <text x="370" y="185" fill="var(--gray)" font-size="10">grad_clip=1.0, patience=10, l1_reg=0.0001</text>
+    </svg>
+  </div>
+</section>
+
+<!-- Slide 29: GBDT Residual Boosting -->
+<section>
+  <h2>GBDT Residual Boosting — 3-Stage Pipeline</h2>
+  <div class="center">
+    <svg width="700" height="280" viewBox="0 0 700 280">
+      <!-- Stage 1 -->
+      <rect x="10" y="20" width="200" height="110" rx="8" fill="var(--blue-bg)" stroke="var(--blue)" stroke-width="2"/>
+      <text x="110" y="45" text-anchor="middle" fill="var(--blue)" font-size="13" font-weight="700">Stage 1</text>
+      <text x="110" y="65" text-anchor="middle" fill="var(--blue)" font-size="11">Train GAM on D features</text>
+      <rect x="30" y="75" width="160" height="35" rx="4" fill="var(--blue)" opacity="0.15" stroke="var(--blue)" stroke-width="1"/>
+      <text x="110" y="97" text-anchor="middle" fill="var(--blue)" font-size="10">GAM_Paper(D=136)</text>
+      <text x="110" y="120" text-anchor="middle" fill="var(--gray)" font-size="9">Captures interpretable signal</text>
+
+      <!-- Arrow 1-2 -->
+      <line x1="215" y1="75" x2="265" y2="75" stroke="var(--gray)" stroke-width="2" marker-end="url(#arrowRight)"/>
+      <text x="240" y="65" text-anchor="middle" fill="var(--gray)" font-size="9">residuals</text>
+
+      <!-- Stage 2 -->
+      <rect x="270" y="20" width="200" height="110" rx="8" fill="var(--orange-bg)" stroke="var(--orange)" stroke-width="2"/>
+      <text x="370" y="45" text-anchor="middle" fill="var(--orange)" font-size="13" font-weight="700">Stage 2</text>
+      <text x="370" y="65" text-anchor="middle" fill="var(--orange)" font-size="11">Train GBDT on residuals</text>
+      <rect x="290" y="75" width="160" height="35" rx="4" fill="var(--orange)" opacity="0.15" stroke="var(--orange)" stroke-width="1"/>
+      <text x="370" y="97" text-anchor="middle" fill="var(--orange)" font-size="10">LightGBM regressor</text>
+      <text x="370" y="120" text-anchor="middle" fill="var(--gray)" font-size="9">Captures what GAM missed</text>
+
+      <!-- Arrow 2-3 -->
+      <line x1="475" y1="75" x2="525" y2="75" stroke="var(--gray)" stroke-width="2" marker-end="url(#arrowRight)"/>
+      <text x="500" y="65" text-anchor="middle" fill="var(--gray)" font-size="9">GBDT score</text>
+
+      <!-- Stage 3 -->
+      <rect x="530" y="20" width="160" height="110" rx="8" fill="var(--green-bg)" stroke="var(--green)" stroke-width="2"/>
+      <text x="610" y="45" text-anchor="middle" fill="var(--green)" font-size="13" font-weight="700">Stage 3</text>
+      <text x="610" y="65" text-anchor="middle" fill="var(--green)" font-size="11">"Magic Curve" Tower</text>
+      <rect x="545" y="75" width="130" height="35" rx="4" fill="var(--green)" opacity="0.15" stroke="var(--green)" stroke-width="1"/>
+      <text x="610" y="97" text-anchor="middle" fill="var(--green)" font-size="10">GAM(D+1 features)</text>
+      <text x="610" y="120" text-anchor="middle" fill="var(--gray)" font-size="9">D frozen + 1 new tower</text>
+
+      <!-- Explanation diagram below -->
+      <rect x="50" y="160" width="600" height="100" rx="8" fill="#fafafa" stroke="var(--gray-light)" stroke-width="1"/>
+      <text x="350" y="182" text-anchor="middle" fill="var(--gray)" font-size="12" font-weight="600">How the Magic Curve Works</text>
+
+      <!-- Formula flow -->
+      <text x="100" y="205" text-anchor="middle" fill="var(--blue)" font-size="11">GAM(x)</text>
+      <text x="155" y="205" text-anchor="middle" fill="var(--gray)" font-size="11">&rarr;</text>
+      <text x="230" y="205" text-anchor="middle" fill="var(--orange)" font-size="11">residual = y - GAM(x)</text>
+      <text x="320" y="205" text-anchor="middle" fill="var(--gray)" font-size="11">&rarr;</text>
+      <text x="410" y="205" text-anchor="middle" fill="var(--orange)" font-size="11">GBDT(residual)</text>
+      <text x="480" y="205" text-anchor="middle" fill="var(--gray)" font-size="11">&rarr;</text>
+      <text x="565" y="205" text-anchor="middle" fill="var(--green)" font-size="11">tower<sub>D+1</sub>(GBDT_score)</text>
+
+      <text x="350" y="235" text-anchor="middle" fill="var(--gray)" font-size="10">Final: score = &sum;<sub>j=1..D</sub> f<sub>j</sub>(x<sub>j</sub>) + f<sub>D+1</sub>(GBDT_score)</text>
+      <text x="350" y="252" text-anchor="middle" fill="var(--gray)" font-size="10">D towers frozen from Stage 1 &mdash; only tower D+1 is trained</text>
+    </svg>
+  </div>
+</section>
+<!-- ==================== SECTION 8: DISTILLATION & SERVING ==================== -->
+
+<!-- Slide 30: Why Distill? -->
+<section>
+  <h2>Distillation — Neural to Piecewise-Linear</h2>
+  <div class="two-col">
+    <div>
+      <h3>Why distill?</h3>
+      <ul>
+        <li><strong>Speed:</strong> PWL evaluation is ~100x faster than MLP forward pass</li>
+        <li class="fragment"><strong>No dependencies:</strong> No PyTorch, no GPU &mdash; pure arithmetic</li>
+        <li class="fragment"><strong>Deployable:</strong> JSON export &rarr; any language (Java, C++, Go)</li>
+        <li class="fragment"><strong>Interpretable:</strong> PWL is literally a lookup table + linear interpolation</li>
+      </ul>
+    </div>
+    <div class="center">
+      <svg width="280" height="220" viewBox="0 0 280 220">
+        <!-- Neural tower -->
+        <rect x="10" y="10" width="110" height="80" rx="6" fill="var(--blue-bg)" stroke="var(--blue)" stroke-width="2"/>
+        <text x="65" y="35" text-anchor="middle" fill="var(--blue)" font-size="11" font-weight="600">Neural Tower</text>
+        <text x="65" y="55" text-anchor="middle" fill="var(--gray)" font-size="9">[1]&rarr;[16]&rarr;[8]&rarr;[1]</text>
+        <text x="65" y="72" text-anchor="middle" fill="var(--gray)" font-size="9">~200 params</text>
+
+        <!-- Arrow -->
+        <line x1="125" y1="50" x2="165" y2="50" stroke="var(--orange)" stroke-width="3" marker-end="url(#arrowOrange)"/>
+        <text x="145" y="42" text-anchor="middle" fill="var(--orange)" font-size="8">distill</text>
+
+        <!-- PWL -->
+        <rect x="170" y="10" width="100" height="80" rx="6" fill="var(--green-bg)" stroke="var(--green)" stroke-width="2"/>
+        <text x="220" y="35" text-anchor="middle" fill="var(--green)" font-size="11" font-weight="600">PWL</text>
+        <text x="220" y="55" text-anchor="middle" fill="var(--gray)" font-size="9">K=5 knots</text>
+        <text x="220" y="72" text-anchor="middle" fill="var(--gray)" font-size="9">10 numbers total</text>
+
+        <!-- Curve comparison -->
+        <rect x="10" y="105" width="260" height="100" rx="4" fill="#fafafa" stroke="var(--gray-light)" stroke-width="1"/>
+        <text x="140" y="120" text-anchor="middle" fill="var(--gray)" font-size="9" font-weight="600">Neural (smooth) vs PWL (piecewise)</text>
+        <!-- Neural curve -->
+        <path d="M30,185 Q60,170 90,140 Q120,115 150,120 Q180,125 210,150 Q240,170 255,175"
+              fill="none" stroke="var(--blue)" stroke-width="2"/>
+        <!-- PWL approximation -->
+        <polyline points="30,185 70,165 110,135 150,122 210,148 255,175"
+                  fill="none" stroke="var(--green)" stroke-width="2" stroke-dasharray="6,3"/>
+        <!-- Knot dots -->
+        <circle cx="30" cy="185" r="3" fill="var(--green)"/>
+        <circle cx="70" cy="165" r="3" fill="var(--green)"/>
+        <circle cx="110" cy="135" r="3" fill="var(--green)"/>
+        <circle cx="150" cy="122" r="3" fill="var(--green)"/>
+        <circle cx="210" cy="148" r="3" fill="var(--green)"/>
+        <circle cx="255" cy="175" r="3" fill="var(--green)"/>
+        <!-- Legend -->
+        <line x1="30" y1="200" x2="50" y2="200" stroke="var(--blue)" stroke-width="2"/>
+        <text x="55" y="203" fill="var(--gray)" font-size="8">Neural</text>
+        <line x1="100" y1="200" x2="120" y2="200" stroke="var(--green)" stroke-width="2" stroke-dasharray="4"/>
+        <text x="125" y="203" fill="var(--gray)" font-size="8">PWL (K=5)</text>
+      </svg>
+    </div>
+  </div>
+</section>
+
+<!-- Slide 31: Algorithm 1 - Greedy Knot Selection -->
+<section>
+  <h2>Algorithm 1: Greedy Knot Selection</h2>
+  <div class="center">
+    <svg width="700" height="250" viewBox="0 0 700 250">
+      <!-- Step 1: Candidates -->
+      <rect x="10" y="10" width="155" height="90" rx="6" fill="var(--blue-bg)" stroke="var(--blue)" stroke-width="1.5"/>
+      <text x="87" y="30" text-anchor="middle" fill="var(--blue)" font-size="11" font-weight="600">1. Generate Candidates</text>
+      <text x="87" y="50" text-anchor="middle" fill="var(--gray)" font-size="10">Percentiles: 0%, 1%,</text>
+      <text x="87" y="65" text-anchor="middle" fill="var(--gray)" font-size="10">2%, ..., 100%</text>
+      <text x="87" y="85" text-anchor="middle" fill="var(--gray)" font-size="9">101 candidate x-values</text>
+
+      <line x1="170" y1="55" x2="195" y2="55" stroke="var(--gray)" stroke-width="2" marker-end="url(#arrowRight)"/>
+
+      <!-- Step 2: Greedy init -->
+      <rect x="200" y="10" width="155" height="90" rx="6" fill="var(--orange-bg)" stroke="var(--orange)" stroke-width="1.5"/>
+      <text x="277" y="30" text-anchor="middle" fill="var(--orange)" font-size="11" font-weight="600">2. Greedy Selection</text>
+      <text x="277" y="50" text-anchor="middle" fill="var(--gray)" font-size="10">Start with 1st percentile</text>
+      <text x="277" y="65" text-anchor="middle" fill="var(--gray)" font-size="10">Add K-1 more knots</text>
+      <text x="277" y="85" text-anchor="middle" fill="var(--gray)" font-size="9">Minimize MSE at each step</text>
+
+      <line x1="360" y1="55" x2="385" y2="55" stroke="var(--gray)" stroke-width="2" marker-end="url(#arrowRight)"/>
+
+      <!-- Step 3: Refinement -->
+      <rect x="390" y="10" width="155" height="90" rx="6" fill="var(--green-bg)" stroke="var(--green)" stroke-width="1.5"/>
+      <text x="467" y="30" text-anchor="middle" fill="var(--green)" font-size="11" font-weight="600">3. Refinement</text>
+      <text x="467" y="50" text-anchor="middle" fill="var(--gray)" font-size="10">Try swapping each knot</text>
+      <text x="467" y="65" text-anchor="middle" fill="var(--gray)" font-size="10">with non-selected ones</text>
+      <text x="467" y="85" text-anchor="middle" fill="var(--gray)" font-size="9">Up to 50 iterations</text>
+
+      <line x1="550" y1="55" x2="575" y2="55" stroke="var(--gray)" stroke-width="2" marker-end="url(#arrowRight)"/>
+
+      <!-- Step 4: Least squares -->
+      <rect x="580" y="10" width="110" height="90" rx="6" fill="var(--purple-bg)" stroke="var(--purple)" stroke-width="1.5"/>
+      <text x="635" y="30" text-anchor="middle" fill="var(--purple)" font-size="11" font-weight="600">4. Fit Y-values</text>
+      <text x="635" y="50" text-anchor="middle" fill="var(--gray)" font-size="10">Least squares</text>
+      <text x="635" y="65" text-anchor="middle" fill="var(--gray)" font-size="10">A &middot; y = f(x)</text>
+      <text x="635" y="85" text-anchor="middle" fill="var(--gray)" font-size="9">Linear interp matrix</text>
+
+      <!-- Visual: knot placement -->
+      <rect x="60" y="120" width="580" height="120" rx="6" fill="#fafafa" stroke="var(--gray-light)" stroke-width="1"/>
+      <text x="350" y="140" text-anchor="middle" fill="var(--gray)" font-size="10" font-weight="600">Knot Placement (K=5)</text>
+
+      <!-- Neural curve -->
+      <path d="M90,220 Q150,200 200,170 Q250,145 300,150 Q350,155 400,180 Q450,200 500,210 Q550,215 610,218"
+            fill="none" stroke="var(--blue)" stroke-width="2" opacity="0.5"/>
+
+      <!-- Selected knots + PWL -->
+      <polyline points="90,220 180,190 260,155 350,152 480,205 610,218"
+                fill="none" stroke="var(--green)" stroke-width="2.5"/>
+      <circle cx="90" cy="220" r="5" fill="var(--green)"/>
+      <circle cx="180" cy="190" r="5" fill="var(--green)"/>
+      <circle cx="260" cy="155" r="5" fill="var(--green)"/>
+      <circle cx="350" cy="152" r="5" fill="var(--green)"/>
+      <circle cx="480" cy="205" r="5" fill="var(--green)"/>
+      <circle cx="610" cy="218" r="5" fill="var(--green)"/>
+
+      <!-- Knot labels -->
+      <text x="90" y="233" text-anchor="middle" fill="var(--green)" font-size="8">k1</text>
+      <text x="180" y="186" text-anchor="middle" fill="var(--green)" font-size="8">k2</text>
+      <text x="260" y="150" text-anchor="middle" fill="var(--green)" font-size="8">k3</text>
+      <text x="350" y="147" text-anchor="middle" fill="var(--green)" font-size="8">k4</text>
+      <text x="480" y="200" text-anchor="middle" fill="var(--green)" font-size="8">k5</text>
+
+      <!-- Paper note -->
+      <text x="350" y="235" text-anchor="middle" fill="var(--gray)" font-size="10">Paper recommendation: K=3-5 knots usually sufficient for GAM towers</text>
+    </svg>
+  </div>
+</section>
+
+<!-- Slide 32: Distillation per Model Type -->
+<section>
+  <h2>What Gets Distilled?</h2>
+  <table>
+    <tr>
+      <th>Model</th><th>Main Towers</th><th>Interactions</th><th>Context</th><th>Diversity</th>
+    </tr>
+    <tr>
+      <td><strong>GAM_Paper</strong></td>
+      <td style="color:var(--green);">&rarr; PWL (K knots)</td>
+      <td>&mdash;</td>
+      <td>&mdash;</td>
+      <td>&mdash;</td>
+    </tr>
+    <tr>
+      <td><strong>GA2M_Paper</strong></td>
+      <td style="color:var(--green);">&rarr; PWL</td>
+      <td style="color:var(--orange);">&rarr; Bilinear grid</td>
+      <td>&mdash;</td>
+      <td>&mdash;</td>
+    </tr>
+    <tr>
+      <td><strong>ContextGAM</strong></td>
+      <td style="color:var(--green);">&rarr; PWL</td>
+      <td>&mdash;</td>
+      <td style="color:var(--red);">Keep neural (~14K params)</td>
+      <td>&mdash;</td>
+    </tr>
+    <tr>
+      <td><strong>SubmodularRankingGAM</strong></td>
+      <td style="color:var(--green);">&rarr; PWL</td>
+      <td>&mdash;</td>
+      <td>&mdash;</td>
+      <td style="color:var(--blue);">Already PWL (export as-is)</td>
+    </tr>
+  </table>
+  <div class="box" style="margin-top:15px;">
+    <strong>JSON Export Structure:</strong>
+    <pre><code class="language-json">{
+  "bias": 0.123,
+  "main_effects": [
+    {"feature": 0, "x": [0.0, 0.3, 0.7, 1.2, 2.5], "y": [-0.1, 0.2, 0.5, 0.6, 0.7]}
+  ],
+  "interactions": [
+    {"features": [3, 7], "x1_grid": [...], "x2_grid": [...], "z": [[...]]}
+  ],
+  "diversity_towers": [
+    {"intercept": 0.0, "x_min": 0.0, "x_max": 1.0, "slopes": [1.6, 0.9, 0.46, 0.24]}
+  ]
+}</code></pre>
+  </div>
+</section>
+<!-- ==================== SECTION 9: JAVA INFERENCE ==================== -->
+
+<!-- Slide 33: Java Inference Architecture -->
+<section>
+  <h2>Java Inference — Zero ML Dependencies</h2>
+  <div class="center">
+    <svg width="700" height="240" viewBox="0 0 700 240">
+      <!-- Python side -->
+      <rect x="10" y="30" width="200" height="170" rx="8" fill="var(--blue-bg)" stroke="var(--blue)" stroke-width="2"/>
+      <text x="110" y="55" text-anchor="middle" fill="var(--blue)" font-size="13" font-weight="700">Python (Training)</text>
+
+      <rect x="25" y="65" width="170" height="28" rx="4" fill="var(--blue)" opacity="0.15" stroke="var(--blue)" stroke-width="1"/>
+      <text x="110" y="84" text-anchor="middle" fill="var(--blue)" font-size="10">Train GAM / GA2M / ...</text>
+
+      <rect x="25" y="100" width="170" height="28" rx="4" fill="var(--orange)" opacity="0.15" stroke="var(--orange)" stroke-width="1"/>
+      <text x="110" y="119" text-anchor="middle" fill="var(--orange)" font-size="10">distill_to_pwl(model)</text>
+
+      <rect x="25" y="135" width="170" height="28" rx="4" fill="var(--green)" opacity="0.15" stroke="var(--green)" stroke-width="1"/>
+      <text x="110" y="154" text-anchor="middle" fill="var(--green)" font-size="10">save_pwl_json(pwl, path)</text>
+
+      <rect x="55" y="172" width="110" height="22" rx="4" fill="var(--orange)" opacity="0.8"/>
+      <text x="110" y="187" text-anchor="middle" fill="white" font-size="10" font-weight="600">model.json</text>
+
+      <!-- Arrow -->
+      <line x1="215" y1="183" x2="275" y2="183" stroke="var(--orange)" stroke-width="3" marker-end="url(#arrowOrange)"/>
+      <text x="245" y="175" text-anchor="middle" fill="var(--orange)" font-size="9">JSON</text>
+
+      <!-- Java side -->
+      <rect x="280" y="30" width="410" height="170" rx="8" fill="var(--green-bg)" stroke="var(--green)" stroke-width="2"/>
+      <text x="485" y="55" text-anchor="middle" fill="var(--green)" font-size="13" font-weight="700">Java (Serving)</text>
+
+      <rect x="295" y="65" width="165" height="55" rx="4" fill="var(--green)" opacity="0.15" stroke="var(--green)" stroke-width="1"/>
+      <text x="377" y="82" text-anchor="middle" fill="var(--green)" font-size="10" font-weight="600">DistilledGamLoader</text>
+      <text x="377" y="100" text-anchor="middle" fill="var(--gray)" font-size="9">fromJson(path)</text>
+      <text x="377" y="113" text-anchor="middle" fill="var(--gray)" font-size="9">Parses + compiles PWL</text>
+
+      <line x1="465" y1="92" x2="490" y2="92" stroke="var(--gray)" stroke-width="1.5" marker-end="url(#arrowRight)"/>
+
+      <rect x="495" y="65" width="180" height="55" rx="4" fill="var(--green)" opacity="0.15" stroke="var(--green)" stroke-width="1"/>
+      <text x="585" y="82" text-anchor="middle" fill="var(--green)" font-size="10" font-weight="600">DistilledGamModel</text>
+      <text x="585" y="100" text-anchor="middle" fill="var(--gray)" font-size="9">score(features) &rarr; double[]</text>
+      <text x="585" y="113" text-anchor="middle" fill="var(--gray)" font-size="9">scoreColumnar() (fast path)</text>
+
+      <!-- Compiled PWL -->
+      <rect x="295" y="130" width="120" height="30" rx="4" fill="var(--purple)" opacity="0.15" stroke="var(--purple)" stroke-width="1"/>
+      <text x="355" y="150" text-anchor="middle" fill="var(--purple)" font-size="9">CompiledPwlFunction</text>
+
+      <rect x="425" y="130" width="120" height="30" rx="4" fill="var(--purple)" opacity="0.15" stroke="var(--purple)" stroke-width="1"/>
+      <text x="485" y="150" text-anchor="middle" fill="var(--purple)" font-size="9">BilinearGridFunction</text>
+
+      <rect x="555" y="130" width="120" height="30" rx="4" fill="var(--purple)" opacity="0.15" stroke="var(--purple)" stroke-width="1"/>
+      <text x="615" y="150" text-anchor="middle" fill="var(--purple)" font-size="9">ConcavePwlFunction</text>
+
+      <!-- Submodular reranker -->
+      <rect x="380" y="170" width="200" height="25" rx="4" fill="var(--green)" opacity="0.3" stroke="var(--green)" stroke-width="1"/>
+      <text x="480" y="187" text-anchor="middle" fill="var(--green)" font-size="9">SubmodularGamReranker (lazy greedy)</text>
+
+      <!-- Dependencies note -->
+      <text x="485" y="220" text-anchor="middle" fill="var(--gray)" font-size="11">Only dependency: Jackson (JSON parsing) &mdash; no ML frameworks</text>
+    </svg>
+  </div>
+</section>
+
+<!-- Slide 34: CompiledPwlFunction -->
+<section>
+  <h2>CompiledPwlFunction — Specialized Evaluators</h2>
+  <p>Switch on K (number of knots) to generate optimized if/else chains:</p>
+  <div class="two-col">
+    <div>
+      <h3>Generic (K &gt; 6): Binary search</h3>
+      <pre><code class="language-java">// O(log K) comparisons per evaluation
+int idx = Arrays.binarySearch(xKnots, x);
+double t = (x - xKnots[idx])
+         / (xKnots[idx+1] - xKnots[idx]);
+return yKnots[idx]
+     + t * (yKnots[idx+1] - yKnots[idx]);</code></pre>
+    </div>
+    <div>
+      <h3 style="color:var(--green);">Compiled (K=3): Inlined constants</h3>
+      <pre><code class="language-java">// All values inlined as final locals
+final double x0=0.1, x1=0.5, x2=1.2;
+final double y0=-0.3, y1=0.4, y2=0.7;
+final double s0=1.75, s1=0.43;
+
+if (x <= x0) return y0;
+if (x >= x2) return y2;
+if (x <= x1)
+    return y0 + s0 * (x - x0);
+return y1 + s1 * (x - x1);</code></pre>
+    </div>
+  </div>
+  <div class="center" style="margin-top:10px;">
+    <svg width="550" height="70" viewBox="0 0 550 70">
+      <text x="10" y="18" fill="var(--gray)" font-size="11" font-weight="600">Specialization by K:</text>
+      <rect x="10" y="30" width="70" height="30" rx="4" fill="var(--green)" opacity="0.2" stroke="var(--green)" stroke-width="1"/>
+      <text x="45" y="50" text-anchor="middle" fill="var(--green)" font-size="10">K=1: const</text>
+      <rect x="90" y="30" width="80" height="30" rx="4" fill="var(--green)" opacity="0.4" stroke="var(--green)" stroke-width="1"/>
+      <text x="130" y="50" text-anchor="middle" fill="var(--green)" font-size="10">K=2: 1 cmp</text>
+      <rect x="180" y="30" width="80" height="30" rx="4" fill="var(--green)" opacity="0.6" stroke="var(--green)" stroke-width="1"/>
+      <text x="220" y="50" text-anchor="middle" fill="var(--green)" font-size="10">K=3: 2 cmp</text>
+      <rect x="270" y="30" width="80" height="30" rx="4" fill="var(--green)" opacity="0.7" stroke="var(--green)" stroke-width="1"/>
+      <text x="310" y="50" text-anchor="middle" fill="var(--green)" font-size="10">K=4-6: flat</text>
+      <rect x="360" y="30" width="100" height="30" rx="4" fill="var(--blue)" opacity="0.3" stroke="var(--blue)" stroke-width="1"/>
+      <text x="410" y="50" text-anchor="middle" fill="var(--blue)" font-size="10">K&gt;6: bsearch</text>
+      <text x="500" y="50" fill="var(--gray)" font-size="9">Typical: K=3-5</text>
+    </svg>
+  </div>
+</section>
+
+<!-- Slide 35: Column-Major Scoring -->
+<section>
+  <h2>Column-Major Scoring — Cache-Friendly</h2>
+  <div class="two-col">
+    <div class="center">
+      <svg width="280" height="280" viewBox="0 0 280 280">
+        <text x="140" y="18" text-anchor="middle" fill="var(--red)" font-size="12" font-weight="600">Row-Major (per document)</text>
+        <!-- Grid -->
+        <rect x="30" y="30" width="220" height="120" fill="none" stroke="var(--gray-light)" stroke-width="1"/>
+        <!-- Rows -->
+        <text x="15" y="55" fill="var(--gray)" font-size="9">doc1</text>
+        <text x="15" y="85" fill="var(--gray)" font-size="9">doc2</text>
+        <text x="15" y="115" fill="var(--gray)" font-size="9">doc3</text>
+        <!-- Cols -->
+        <text x="55" y="28" text-anchor="middle" fill="var(--gray)" font-size="8">f1</text>
+        <text x="90" y="28" text-anchor="middle" fill="var(--gray)" font-size="8">f2</text>
+        <text x="125" y="28" text-anchor="middle" fill="var(--gray)" font-size="8">f3</text>
+        <text x="160" y="28" text-anchor="middle" fill="var(--gray)" font-size="8">...</text>
+        <text x="195" y="28" text-anchor="middle" fill="var(--gray)" font-size="8">f135</text>
+        <text x="230" y="28" text-anchor="middle" fill="var(--gray)" font-size="8">f136</text>
+        <!-- Highlight row-by-row access (scattered) -->
+        <rect x="30" y="38" width="220" height="22" rx="2" fill="var(--red)" opacity="0.15" stroke="var(--red)" stroke-width="1.5"/>
+        <!-- Access pattern arrows (zigzag) -->
+        <polyline points="45,49 80,49 115,49 150,49 185,49 220,49 235,49"
+                  fill="none" stroke="var(--red)" stroke-width="2" marker-end="url(#arrowRedRight)"/>
+        <defs><marker id="arrowRedRight" markerWidth="6" markerHeight="4" refX="6" refY="2" orient="auto"><path d="M0,0 L6,2 L0,4" fill="var(--red)"/></marker></defs>
+
+        <text x="140" y="175" text-anchor="middle" fill="var(--red)" font-size="10">Each doc loads ALL 136 features</text>
+        <text x="140" y="192" text-anchor="middle" fill="var(--red)" font-size="10">Different tower for each feature</text>
+        <text x="140" y="209" text-anchor="middle" fill="var(--red)" font-size="10">&rarr; Poor instruction cache locality</text>
+      </svg>
+    </div>
+    <div class="center">
+      <svg width="280" height="280" viewBox="0 0 280 280">
+        <text x="140" y="18" text-anchor="middle" fill="var(--green)" font-size="12" font-weight="600">Column-Major (per feature)</text>
+        <!-- Grid -->
+        <rect x="30" y="30" width="220" height="120" fill="none" stroke="var(--gray-light)" stroke-width="1"/>
+        <!-- Rows -->
+        <text x="15" y="55" fill="var(--gray)" font-size="9">doc1</text>
+        <text x="15" y="85" fill="var(--gray)" font-size="9">doc2</text>
+        <text x="15" y="115" fill="var(--gray)" font-size="9">doc3</text>
+        <!-- Cols -->
+        <text x="55" y="28" text-anchor="middle" fill="var(--gray)" font-size="8">f1</text>
+        <text x="90" y="28" text-anchor="middle" fill="var(--gray)" font-size="8">f2</text>
+        <text x="125" y="28" text-anchor="middle" fill="var(--gray)" font-size="8">f3</text>
+        <text x="160" y="28" text-anchor="middle" fill="var(--gray)" font-size="8">...</text>
+        <text x="195" y="28" text-anchor="middle" fill="var(--gray)" font-size="8">f135</text>
+        <text x="230" y="28" text-anchor="middle" fill="var(--gray)" font-size="8">f136</text>
+        <!-- Highlight column access -->
+        <rect x="37" y="35" width="30" height="112" rx="2" fill="var(--green)" opacity="0.15" stroke="var(--green)" stroke-width="1.5"/>
+        <!-- Access pattern (down column) -->
+        <polyline points="52,42 52,55 52,82 52,112 52,140"
+                  fill="none" stroke="var(--green)" stroke-width="2" marker-end="url(#arrowGreenDown)"/>
+        <defs><marker id="arrowGreenDown" markerWidth="6" markerHeight="6" refX="3" refY="6" orient="auto"><path d="M0,0 L3,6 L6,0" fill="var(--green)"/></marker></defs>
+
+        <text x="140" y="175" text-anchor="middle" fill="var(--green)" font-size="10">Extract one feature column</text>
+        <text x="140" y="192" text-anchor="middle" fill="var(--green)" font-size="10">Same PWL evaluator for all docs</text>
+        <text x="140" y="209" text-anchor="middle" fill="var(--green)" font-size="10">&rarr; Sequential reads, L1/L2 cache hit</text>
+      </svg>
+    </div>
+  </div>
+  <div class="box" style="margin-top:5px;">
+    <strong>Performance:</strong> Column-major is <strong>2-4x faster</strong> for large lists (1K+ docs). Feature column fits in L1 cache (10K doubles = 80KB).
+  </div>
+</section>
+
+<!-- Slide 36: Submodular Reranker in Java -->
+<section>
+  <h2>SubmodularGamReranker — Lazy Greedy</h2>
+  <div class="two-col">
+    <div>
+      <p><strong>Minoux lazy greedy (1978)</strong> exploits submodularity to skip recomputation:</p>
+      <ol class="small">
+        <li>Compute base scores once (cached)</li>
+        <li>Initialize priority queue with upper-bound gains</li>
+        <li>For each of k positions:
+          <ul>
+            <li>Pop top candidate from queue</li>
+            <li>Recompute true marginal gain</li>
+            <li>If still best &rarr; select it</li>
+            <li>Otherwise push back, try next</li>
+          </ul>
+        </li>
+        <li>Submodularity guarantees: previous gain &ge; current gain</li>
+      </ol>
+      <div class="box-green" style="margin-top:10px;">
+        <strong>Budget control:</strong> Limit max evaluations per position.<br>
+        10K candidates, k=40, budget=10 &rarr; ~400 evals (vs 400K naive).<br>
+        <strong>1000x speedup</strong> for reasonable budgets.
+      </div>
+    </div>
+    <div class="center">
+      <svg width="280" height="270" viewBox="0 0 280 270">
+        <text x="140" y="18" text-anchor="middle" fill="var(--gray)" font-size="11" font-weight="600">Priority Queue + Lazy Eval</text>
+
+        <!-- Priority queue -->
+        <rect x="20" y="30" width="240" height="170" rx="6" fill="#fafafa" stroke="var(--gray-light)" stroke-width="1"/>
+        <text x="140" y="50" text-anchor="middle" fill="var(--gray)" font-size="10" font-weight="600">Max-Heap (by upper bound)</text>
+
+        <!-- Queue entries -->
+        <rect x="35" y="58" width="210" height="22" rx="3" fill="var(--green)" opacity="0.7"/>
+        <text x="140" y="73" text-anchor="middle" fill="white" font-size="9">Item 15: UB=1.8 &rarr; recompute &rarr; true=1.4 &checkmark;</text>
+
+        <rect x="35" y="85" width="210" height="22" rx="3" fill="var(--blue)" opacity="0.4"/>
+        <text x="140" y="100" text-anchor="middle" fill="white" font-size="9">Item 42: UB=1.5 &rarr; skip (1.5 &lt; 1.4? No, eval)</text>
+
+        <rect x="35" y="112" width="210" height="22" rx="3" fill="var(--blue)" opacity="0.3"/>
+        <text x="140" y="127" text-anchor="middle" fill="white" font-size="9">Item 7: UB=1.3 &rarr; skip (1.3 &lt; 1.4 &checkmark;)</text>
+
+        <rect x="35" y="139" width="210" height="22" rx="3" fill="var(--blue)" opacity="0.2"/>
+        <text x="140" y="154" text-anchor="middle" fill="white" font-size="9">Item 91: UB=1.1 &rarr; skip</text>
+
+        <rect x="35" y="166" width="210" height="22" rx="3" fill="var(--blue)" opacity="0.15"/>
+        <text x="140" y="181" text-anchor="middle" fill="white" font-size="9">... (remaining candidates skipped)</text>
+
+        <!-- Arrow showing the key property -->
+        <text x="140" y="220" text-anchor="middle" fill="var(--green)" font-size="11" font-weight="600">Submodularity property:</text>
+        <text x="140" y="240" text-anchor="middle" fill="var(--green)" font-size="10">prev_gain(item) &ge; current_gain(item)</text>
+        <text x="140" y="258" text-anchor="middle" fill="var(--gray)" font-size="10">&rArr; Upper bounds never increase</text>
+      </svg>
+    </div>
+  </div>
+</section>
+
+<!-- Slide 37: Performance Numbers -->
+<section>
+  <h2>Java Performance Benchmarks</h2>
+  <table>
+    <tr>
+      <th>Operation</th><th>List=40</th><th>List=1K</th><th>List=10K</th>
+    </tr>
+    <tr>
+      <td>GAM row-major scoring</td>
+      <td>~30 Mops/s</td>
+      <td>~45 Mops/s</td>
+      <td>~55 Mops/s</td>
+    </tr>
+    <tr>
+      <td><strong style="color:var(--green);">GAM column-major scoring</strong></td>
+      <td><strong>~50 Mops/s</strong></td>
+      <td><strong>~90 Mops/s</strong></td>
+      <td><strong>~120 Mops/s</strong></td>
+    </tr>
+    <tr>
+      <td>GA2M column-major (5 pairs)</td>
+      <td>~15 Mops/s</td>
+      <td>~25 Mops/s</td>
+      <td>~35 Mops/s</td>
+    </tr>
+    <tr>
+      <td>Compiled PWL vs generic</td>
+      <td colspan="3" style="color:var(--green);">3-5x faster (K=3-5 knots)</td>
+    </tr>
+    <tr>
+      <td>Submodular rerank (budget=10)</td>
+      <td>~5K queries/s</td>
+      <td>~500 queries/s</td>
+      <td>~50 queries/s</td>
+    </tr>
+  </table>
+  <div class="box" style="margin-top:15px;">
+    <strong>Key takeaways:</strong>
+    <ul class="small">
+      <li>Column-major is <strong>2-4x faster</strong> than row-major for large lists</li>
+      <li>Compiled PWL evaluators eliminate loop/search overhead for typical K=3-5</li>
+      <li>Lazy greedy with budget makes submodular reranking practical at scale</li>
+      <li>All numbers on single thread &mdash; further parallelizable across queries</li>
+    </ul>
+  </div>
+</section>
+
+<!-- Slide 38: End-to-End Pipeline -->
+<section>
+  <h2>End-to-End: Train &rarr; Distill &rarr; Serve</h2>
+  <div class="center">
+    <svg width="700" height="280" viewBox="0 0 700 280">
+      <!-- Phase 1: Python Training -->
+      <rect x="10" y="30" width="200" height="200" rx="10" fill="var(--blue-bg)" stroke="var(--blue)" stroke-width="2"/>
+      <text x="110" y="55" text-anchor="middle" fill="var(--blue)" font-size="14" font-weight="700">Python</text>
+
+      <rect x="25" y="65" width="170" height="28" rx="4" fill="var(--blue)" opacity="0.8"/>
+      <text x="110" y="84" text-anchor="middle" fill="white" font-size="10">1. Load MSLR data</text>
+
+      <rect x="25" y="100" width="170" height="28" rx="4" fill="var(--blue)" opacity="0.7"/>
+      <text x="110" y="119" text-anchor="middle" fill="white" font-size="10">2. Train GAM/GA2M/...</text>
+
+      <rect x="25" y="135" width="170" height="28" rx="4" fill="var(--blue)" opacity="0.6"/>
+      <text x="110" y="154" text-anchor="middle" fill="white" font-size="10">3. Evaluate NDCG@10</text>
+
+      <rect x="25" y="170" width="170" height="28" rx="4" fill="var(--orange)" opacity="0.8"/>
+      <text x="110" y="189" text-anchor="middle" fill="white" font-size="10">4. distill_to_pwl()</text>
+
+      <rect x="25" y="205" width="170" height="18" rx="4" fill="var(--green)" opacity="0.8"/>
+      <text x="110" y="218" text-anchor="middle" fill="white" font-size="10">5. save_pwl_json()</text>
+
+      <!-- Arrow: JSON file -->
+      <line x1="215" y1="150" x2="275" y2="150" stroke="var(--orange)" stroke-width="3" marker-end="url(#arrowOrange)"/>
+      <rect x="230" y="155" width="70" height="20" rx="4" fill="var(--orange)" opacity="0.9"/>
+      <text x="265" y="169" text-anchor="middle" fill="white" font-size="9">.json</text>
+
+      <!-- Phase 2: Java Serving -->
+      <rect x="280" y="30" width="200" height="200" rx="10" fill="var(--green-bg)" stroke="var(--green)" stroke-width="2"/>
+      <text x="380" y="55" text-anchor="middle" fill="var(--green)" font-size="14" font-weight="700">Java Serving</text>
+
+      <rect x="295" y="65" width="170" height="28" rx="4" fill="var(--green)" opacity="0.8"/>
+      <text x="380" y="84" text-anchor="middle" fill="white" font-size="10">6. Load + compile PWL</text>
+
+      <rect x="295" y="100" width="170" height="28" rx="4" fill="var(--green)" opacity="0.7"/>
+      <text x="380" y="119" text-anchor="middle" fill="white" font-size="10">7. Column-major scoring</text>
+
+      <rect x="295" y="135" width="170" height="28" rx="4" fill="var(--green)" opacity="0.6"/>
+      <text x="380" y="154" text-anchor="middle" fill="white" font-size="10">8. (Optional) rerank</text>
+
+      <rect x="295" y="170" width="170" height="28" rx="4" fill="var(--green)" opacity="0.5"/>
+      <text x="380" y="189" text-anchor="middle" fill="white" font-size="10">9. Return ranked results</text>
+
+      <!-- Phase 3: Monitoring -->
+      <line x1="485" y1="150" x2="520" y2="150" stroke="var(--gray)" stroke-width="2" marker-end="url(#arrowRight)"/>
+
+      <rect x="525" y="30" width="165" height="200" rx="10" fill="var(--purple-bg)" stroke="var(--purple)" stroke-width="2"/>
+      <text x="607" y="55" text-anchor="middle" fill="var(--purple)" font-size="14" font-weight="700">Monitoring</text>
+
+      <rect x="540" y="70" width="135" height="25" rx="4" fill="var(--purple)" opacity="0.2" stroke="var(--purple)" stroke-width="1"/>
+      <text x="607" y="87" text-anchor="middle" fill="var(--purple)" font-size="10">Response curves</text>
+
+      <rect x="540" y="102" width="135" height="25" rx="4" fill="var(--purple)" opacity="0.2" stroke="var(--purple)" stroke-width="1"/>
+      <text x="607" y="119" text-anchor="middle" fill="var(--purple)" font-size="10">explain() attribution</text>
+
+      <rect x="540" y="134" width="135" height="25" rx="4" fill="var(--purple)" opacity="0.2" stroke="var(--purple)" stroke-width="1"/>
+      <text x="607" y="151" text-anchor="middle" fill="var(--purple)" font-size="10">Diversity metrics</text>
+
+      <rect x="540" y="166" width="135" height="25" rx="4" fill="var(--purple)" opacity="0.2" stroke="var(--purple)" stroke-width="1"/>
+      <text x="607" y="183" text-anchor="middle" fill="var(--purple)" font-size="10">Weight tuning</text>
+
+      <rect x="540" y="198" width="135" height="25" rx="4" fill="var(--purple)" opacity="0.2" stroke="var(--purple)" stroke-width="1"/>
+      <text x="607" y="215" text-anchor="middle" fill="var(--purple)" font-size="10">A/B experiments</text>
+
+      <!-- Bottom note -->
+      <text x="350" y="260" text-anchor="middle" fill="var(--gray)" font-size="11">Complete deployment: interpretable training + fast inference + runtime control</text>
+    </svg>
+  </div>
+</section>
+<!-- ==================== SECTION 10: SUMMARY ==================== -->
+
+<!-- Slide 39: Key Takeaways -->
+<section>
+  <h2>Key Takeaways</h2>
+  <div class="center">
+    <svg width="700" height="350" viewBox="0 0 700 350">
+      <!-- Central hub -->
+      <circle cx="350" cy="175" r="55" fill="var(--blue)" opacity="0.1" stroke="var(--blue)" stroke-width="2"/>
+      <text x="350" y="170" text-anchor="middle" fill="var(--blue)" font-size="14" font-weight="700">ranking_gam</text>
+      <text x="350" y="190" text-anchor="middle" fill="var(--gray)" font-size="10">Interpretable L2R</text>
+
+      <!-- Spoke 1: Interpretability -->
+      <line x1="310" y1="130" x2="170" y2="50" stroke="var(--blue)" stroke-width="1.5"/>
+      <rect x="50" y="20" width="170" height="55" rx="8" fill="var(--blue-bg)" stroke="var(--blue)" stroke-width="1.5"/>
+      <text x="135" y="42" text-anchor="middle" fill="var(--blue)" font-size="11" font-weight="600">Interpretable</text>
+      <text x="135" y="60" text-anchor="middle" fill="var(--gray)" font-size="9">Response curves, explain(),</text>
+      <text x="135" y="72" text-anchor="middle" fill="var(--gray)" font-size="9">per-feature attribution</text>
+
+      <!-- Spoke 2: Competitive -->
+      <line x1="395" y1="130" x2="530" y2="50" stroke="var(--orange)" stroke-width="1.5"/>
+      <rect x="470" y="20" width="170" height="55" rx="8" fill="var(--orange-bg)" stroke="var(--orange)" stroke-width="1.5"/>
+      <text x="555" y="42" text-anchor="middle" fill="var(--orange)" font-size="11" font-weight="600">Competitive NDCG</text>
+      <text x="555" y="60" text-anchor="middle" fill="var(--gray)" font-size="9">ContextGAM + ndcg2pp loss</text>
+      <text x="555" y="72" text-anchor="middle" fill="var(--gray)" font-size="9">approaches black-box models</text>
+
+      <!-- Spoke 3: Diversity -->
+      <line x1="300" y1="200" x2="140" y2="270" stroke="var(--green)" stroke-width="1.5"/>
+      <rect x="25" y="245" width="170" height="55" rx="8" fill="var(--green-bg)" stroke="var(--green)" stroke-width="1.5"/>
+      <text x="110" y="267" text-anchor="middle" fill="var(--green)" font-size="11" font-weight="600">Diversity-Aware</text>
+      <text x="110" y="285" text-anchor="middle" fill="var(--gray)" font-size="9">Submodular greedy reranking</text>
+      <text x="110" y="297" text-anchor="middle" fill="var(--gray)" font-size="9">(1-1/e) optimality guarantee</text>
+
+      <!-- Spoke 4: Multi-Objective -->
+      <line x1="400" y1="200" x2="530" y2="275" stroke="var(--purple)" stroke-width="1.5"/>
+      <rect x="470" y="250" width="170" height="55" rx="8" fill="var(--purple-bg)" stroke="var(--purple)" stroke-width="1.5"/>
+      <text x="555" y="272" text-anchor="middle" fill="var(--purple)" font-size="11" font-weight="600">Runtime Controllable</text>
+      <text x="555" y="290" text-anchor="middle" fill="var(--gray)" font-size="9">Multi-objective weights at</text>
+      <text x="555" y="302" text-anchor="middle" fill="var(--gray)" font-size="9">serving time, no retraining</text>
+
+      <!-- Spoke 5: Fast Inference -->
+      <line x1="350" y1="232" x2="350" y2="305" stroke="var(--green)" stroke-width="1.5"/>
+      <rect x="250" y="310" width="200" height="35" rx="8" fill="var(--green)" opacity="0.85"/>
+      <text x="350" y="332" text-anchor="middle" fill="white" font-size="11" font-weight="600">Fast Java Inference (PWL + Compiled)</text>
+
+      <!-- Spoke 6: Boosting -->
+      <line x1="350" y1="120" x2="350" y2="40" stroke="var(--orange)" stroke-width="1.5"/>
+      <rect x="260" y="5" width="180" height="35" rx="8" fill="var(--orange)" opacity="0.85"/>
+      <text x="350" y="27" text-anchor="middle" fill="white" font-size="11" font-weight="600">GBDT Residual Boosting</text>
+    </svg>
+  </div>
+</section>
+
+<!-- Slide 40: References -->
+<section class="center">
+  <h2>References & Resources</h2>
+  <div style="text-align:left; max-width:600px; margin:0 auto;">
+    <div class="box" style="margin-bottom:15px;">
+      <strong>Paper:</strong> Zhuang et al. "Interpretable Ranking with Generalized Additive Models" (WSDM 2021)
+    </div>
+    <div class="box" style="margin-bottom:15px;">
+      <strong>Key concepts:</strong>
+      <ul class="small">
+        <li>GAM: Hastie & Tibshirani (1990)</li>
+        <li>GA2M: Lou et al. "Intelligible Models for Classification and Regression" (KDD 2013)</li>
+        <li>Submodularity: Nemhauser et al. (1978) &mdash; greedy (1-1/e) bound</li>
+        <li>Lazy Greedy: Minoux (1978) &mdash; accelerated submodular maximization</li>
+        <li>LambdaLoss: Wang et al. "The LambdaLoss Framework" (CIKM 2018)</li>
+      </ul>
+    </div>
+    <div class="box">
+      <strong>Library:</strong> <code>ranking_gam</code> &mdash; PyTorch training + Java inference
+    </div>
+  </div>
+</section>
+
+</div><!-- end .slides -->
+</div><!-- end .reveal -->
+
+<script src="https://unpkg.com/reveal.js@5.1.0/dist/reveal.js"></script>
+<script src="https://unpkg.com/reveal.js@5.1.0/plugin/highlight/highlight.js"></script>
+<script src="https://unpkg.com/reveal.js@5.1.0/plugin/notes/notes.js"></script>
+<script>
+Reveal.initialize({
+  hash: true,
+  slideNumber: true,
+  width: 960,
+  height: 700,
+  margin: 0.04,
+  transition: 'slide',
+  plugins: [RevealHighlight, RevealNotes]
+});
+</script>
+</body>
+</html>
